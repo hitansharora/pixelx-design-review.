@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PixelX Studios | Client Design Review & 3D Interior Approval Portal</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <!-- Three.js & OrbitControls for Real-Time 3D Interior Room Visualization -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+  <!-- Top App Navigation Bar -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-mark">PX</span>
+        <div class="logo-text">
+          <span class="brand-title">PixelX Studios</span>
+          <span class="brand-sub">Client Design Review & 3D Approval Portal</span>
+        </div>
+      </div>
+      <div class="project-pill">
+        <span class="dot live"></span>
+        <span class="project-name" id="projectName">Villa Serena • Project #104</span>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <!-- Role Switcher (Designer vs Client) -->
+      <div class="role-selector">
+        <span class="role-label">Viewing As:</span>
+        <div class="segmented-control">
+          <button id="roleClientBtn" class="seg-btn active" onclick="setRole('client')">Client (Ananya)</button>
+          <button id="roleDesignerBtn" class="seg-btn" onclick="setRole('designer')">Lead Designer</button>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <button class="btn btn-outline" onclick="openCostModal()">💰 Cost Breakdown</button>
+      <button class="btn btn-secondary" onclick="openSummaryModal()">📋 Sign-off Report</button>
+      <button class="btn btn-outline" onclick="resetDemoData()" title="Reset to initial sample data">↺ Reset Demo</button>
+    </div>
+  </header>
+
+  <!-- Project Metrics & Budget Overview Banner -->
+  <section class="project-stats-strip">
+    <div class="stats-left">
+      <div class="stat-badge-item">
+        <span class="stat-icon">🏠</span>
+        <div class="stat-data">
+          <span class="stat-label">Project Spaces</span>
+          <strong id="statsTotalSpaces">3 Spaces</strong>
+        </div>
+      </div>
+      <div class="stat-badge-item">
+        <span class="stat-icon success">✓</span>
+        <div class="stat-data">
+          <span class="stat-label">Approval Progress</span>
+          <strong id="statsApprovalRatio">2 of 3 Approved</strong>
+        </div>
+      </div>
+      <div class="stat-badge-item">
+        <span class="stat-icon warning">⏳</span>
+        <div class="stat-data">
+          <span class="stat-label">Needs Review</span>
+          <strong id="statsPendingReview">1 In Review</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-right">
+      <div class="budget-stat-box">
+        <div class="budget-info-row">
+          <span class="stat-label">Estimated Investment vs Target Budget:</span>
+          <strong class="stat-cost-val" id="statsTotalCost">$77,700</strong>
+          <span class="budget-target" id="statsTargetBudget">of $85,000 Target</span>
+        </div>
+        <div class="budget-bar-track">
+          <div class="budget-bar-fill" id="statsBudgetBar" style="width: 85%;"></div>
+        </div>
+      </div>
+      <span class="budget-badge-status" id="statsBudgetStatus">Within Budget</span>
+    </div>
+  </section>
+
+  <!-- Main Container -->
+  <main class="main-layout">
+    
+    <!-- Left Sidebar: Room List & Progress -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h3>Project Spaces</h3>
+        <span class="badge badge-accent" id="overallApprovalBadge">2/3 Approved</span>
+      </div>
+      <p class="sidebar-desc">Select a space to customize its 3D materials, review layout options, and record approval decisions.</p>
+
+      <!-- Room Selection List -->
+      <ul class="room-nav" id="roomNavList">
+        <!-- Rendered dynamically by JavaScript -->
+      </ul>
+
+      <!-- Add New Space Action -->
+      <div style="margin-top: 1rem;">
+        <button class="btn btn-sm btn-outline-primary w-100" onclick="openAddRoomModal()">+ Add New Space</button>
+      </div>
+
+      <!-- Project Quick Stats -->
+      <div class="project-stat-card">
+        <h4>Review Progress</h4>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-fill" id="overallProgressBar" style="width: 66%;"></div>
+        </div>
+        <div class="stat-footer">
+          <span id="progressText">66% Complete</span>
+          <span class="revision-flag">v2.3 Active</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center & Right: Room Detail & Interactive Review Area -->
+    <section class="content-area">
+      
+      <!-- Room Title & Design Option Switcher Bar -->
+      <div class="room-action-bar">
+        <div class="room-meta">
+          <div class="room-heading-row">
+            <h1 id="currentRoomTitle">Living Room</h1>
+            <span class="status-badge" id="currentRoomStatusBadge">Under Review</span>
+          </div>
+          <p class="room-subtext" id="currentRoomDesc">Main social area featuring floor-to-ceiling glass and high ceilings.</p>
+        </div>
+
+        <div class="concept-switcher-wrap">
+          <span class="concept-label">Select Concept:</span>
+          <div class="option-pill-group" id="conceptButtonGroup">
+            <!-- Dynamically populated options (e.g. Option A vs Option B) -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Two Column Layout: Design Visuals & Materials / Comments -->
+      <div class="workspace-grid">
+
+        <!-- Column 1: Visual Renders & Interactive 3D Room Studio -->
+        <div class="visual-panel">
+          
+          <!-- Viewport Box: Houses both 3D WebGL Studio & 2D Photo Gallery -->
+          <div class="render-viewport" id="viewportMain">
+            
+            <!-- Viewport Mode Switcher Header -->
+            <div class="viewport-header-bar">
+              <div class="view-mode-tabs">
+                <button id="btnView3D" class="view-tab-btn active" onclick="switchViewportMode('3d')">
+                  🛋️ 3D Interactive Studio
+                </button>
+                <button id="btnViewPhoto" class="view-tab-btn" onclick="switchViewportMode('photo')">
+                  📷 2D Concept Photos
+                </button>
+              </div>
+
+              <!-- 3D Controls Toolbar (Camera Presets & Lighting Ambience) -->
+              <div class="viewport-3d-controls" id="viewport3DControls">
+                <!-- Camera Presets -->
+                <div class="btn-group-pill">
+                  <button class="pill-btn active" id="btnCamPersp" onclick="setViewerCamera('perspective')" title="Lounge Perspective">🛋️ Perspective</button>
+                  <button class="pill-btn" id="btnCamIso" onclick="setViewerCamera('isometric')" title="Isometric Cutaway">📐 Isometric</button>
+                  <button class="pill-btn" id="btnCamTop" onclick="setViewerCamera('topdown')" title="Top-Down Floorplan">🗺️ Top-Down</button>
+                </div>
+                <div class="bar-divider"></div>
+                <!-- Lighting Presets -->
+                <div class="btn-group-pill">
+                  <button class="pill-btn" id="btnLightDay" onclick="setViewerLighting('day')" title="Crisp Daylight">☀️ Day</button>
+                  <button class="pill-btn active" id="btnLightGolden" onclick="setViewerLighting('golden')" title="Golden Hour Warmth">🌅 Golden</button>
+                  <button class="pill-btn" id="btnLightNight" onclick="setViewerLighting('night')" title="Evening Ambient">🌙 Night</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 1. Three.js Interactive 3D Container -->
+            <div id="three-canvas-container" class="three-canvas-wrap"></div>
+
+            <!-- 2. 2D Photo Render View (when Photo mode is chosen) -->
+            <div id="photoRenderWrap" class="photo-render-wrap" style="display: none;">
+              <img id="activeRenderImg" src="" alt="Room Concept Preview" class="render-image">
+              <div class="render-overlay-badge" id="renderConceptBadge">Option A: Japandi Minimalist</div>
+              <div class="revision-indicator" id="renderRevisionVersion">Version 2.0</div>
+            </div>
+
+            <!-- Floating 3D Interaction Hint -->
+            <div class="viewport-interactive-hint" id="viewport3DHint">
+              ✨ Rotate & pan with mouse. Click any material swatch below to customize the 3D model in real time!
+            </div>
+          </div>
+
+          <!-- Thumbnail Gallery for multiple angles (Photo Mode) -->
+          <div class="angles-gallery" id="anglesGallery" style="display: none;">
+            <!-- Populated by JS -->
+          </div>
+
+          <!-- Problem Statement Core: Granular 3-Pillar Approval Tracker -->
+          <div class="palette-card" style="margin-bottom: 1.25rem;">
+            <div class="palette-header">
+              <h3>Granular Review: Layout, Materials & Color Scheme</h3>
+              <span class="helper-text">Record Decisions Per Pillar</span>
+            </div>
+            <div class="pillar-review-grid" id="pillarReviewGrid">
+              <!-- Dynamically rendered by JS: Layout status, Material status, Color scheme status -->
+            </div>
+          </div>
+
+          <!-- Material & Color Scheme Palette Section -->
+          <div class="palette-card">
+            <div class="palette-header">
+              <div>
+                <h3>Curated Material & Color Palette</h3>
+                <span class="helper-text">Click any swatch to apply to 3D room and view specifications</span>
+              </div>
+              <span class="badge badge-subtle" id="activePaletteTag">5 Specified Finishes</span>
+            </div>
+            <div class="swatches-grid" id="swatchesGrid">
+              <!-- Dynamically populated swatches -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Column 2: Approval Controls & Commenting Feed -->
+        <div class="approval-panel">
+
+          <!-- Decision Action Card -->
+          <div class="decision-card">
+            <h3>Client Review Decision</h3>
+            <p class="decision-desc">
+              Formal approval locks this concept for procurement, contractor fabrication, and trade drawings.
+            </p>
+
+            <div class="decision-status-box" id="decisionStatusBox">
+              <span class="decision-icon" id="decisionStatusIcon">⏳</span>
+              <div class="decision-text-wrap">
+                <strong id="decisionStatusTitle">Review In Progress</strong>
+                <span id="decisionStatusSubtitle">Client sign-off pending for Option A</span>
+              </div>
+            </div>
+
+            <div class="action-btn-row">
+              <button class="btn btn-success" id="btnApprove" onclick="handleApprove()">
+                ✓ Approve This Concept
+              </button>
+              <button class="btn btn-danger" id="btnRequestChanges" onclick="openRevisionModal()">
+                ✕ Request Changes
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Estimated Cost Summary Card -->
+          <div class="cost-summary-card">
+            <div class="cost-card-header">
+              <div>
+                <span class="cost-card-label">Estimated Space Investment</span>
+                <div class="cost-card-price" id="roomEstimatedCost">$28,500</div>
+              </div>
+              <button class="btn btn-sm btn-outline-gold" onclick="openCostModal()">
+                Breakdown 📊
+              </button>
+            </div>
+            <p class="cost-card-sub" id="roomSqftSubtext">380 sq ft &bull; Includes custom millwork, soft furnishings & labor</p>
+          </div>
+
+          <!-- Revision & Comments Thread -->
+          <div class="comments-card">
+            <div class="comments-card-header">
+              <h3>Design Feedback & Notes</h3>
+              <span class="comment-count-badge" id="commentCountBadge">3 Notes</span>
+            </div>
+
+            <!-- Scrollable Comment List -->
+            <div class="comments-feed" id="commentsFeed">
+              <!-- Populated dynamically -->
+            </div>
+
+            <!-- New Comment Box -->
+            <form class="new-comment-form" onsubmit="handlePostComment(event)">
+              <div class="comment-input-wrap">
+                <textarea 
+                  id="commentInput" 
+                  rows="2" 
+                  placeholder="Share feedback on color, furniture placement, or finishes..." 
+                  required></textarea>
+                <div class="comment-form-actions">
+                  <div style="display:flex; align-items:center; gap:0.4rem;">
+                    <span class="commenting-as" id="commentingAsLabel">As: <b>Client</b></span>
+                    <select id="commentTagSelect" class="form-tag-select">
+                      <option value="General">General</option>
+                      <option value="Materials">Materials</option>
+                      <option value="Layout">Layout</option>
+                      <option value="Lighting">Lighting</option>
+                      <option value="Budget">Budget</option>
+                    </select>
+                  </div>
+                  <button type="submit" class="btn btn-sm btn-primary">Send Note</button>
+                </div>
+              </div>
+            </form>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ========================================================
+       MODALS SYSTEM (Replacing all alert() and prompt() popups)
+       ======================================================== -->
+
+  <!-- 1. MATERIAL SPECIFICATION MODAL (Replaces annoying alert popups) -->
+  <div class="modal-backdrop" id="materialModal">
+    <div class="modal-card modal-md">
+      <div class="modal-header">
+        <div>
+          <h3 id="matModalTitle">Material Specification</h3>
+          <span class="subhead" id="matModalCategory">Flooring Specification</span>
+        </div>
+        <button class="close-btn" onclick="closeMaterialModal()">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="mat-detail-row">
+          <div class="mat-preview-swatch" id="matModalSwatch"></div>
+          <div class="mat-detail-main">
+            <h4 id="matModalName">Herringbone White Oak</h4>
+            <div class="mat-meta-line" id="matModalCode">Code: WD-701 &bull; Finish: Matte UV Poly</div>
+            <div class="mat-price-tag" id="matModalPrice">$22 / sq ft &bull; Select Grade</div>
+          </div>
+        </div>
+
+        <div class="mat-spec-table">
+          <div class="spec-cell">
+            <span class="spec-label">Supplier / Brand:</span>
+            <strong id="matModalSupplier">Havwoods International</strong>
+          </div>
+          <div class="spec-cell">
+            <span class="spec-label">Color Hex Code:</span>
+            <strong id="matModalHex">#CBB69D</strong>
+          </div>
+          <div class="spec-cell">
+            <span class="spec-label">Durability / Grade:</span>
+            <strong id="matModalGrade">High Traffic Residential (60,000 Rubs)</strong>
+          </div>
+          <div class="spec-cell">
+            <span class="spec-label">Lead Time:</span>
+            <strong id="matModalLeadTime">2-3 Weeks Direct Stock</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeMaterialModal()">Close</button>
+        <button class="btn btn-primary" id="btnApplyMaterialModal" onclick="confirmApplyMaterialFromModal()">
+          ✓ Apply to 3D Room & Layout
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. ITEMIZED COST BREAKDOWN MODAL -->
+  <div class="modal-backdrop" id="costModal">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3>Estimated Space & Project Investment Breakdown</h3>
+          <span class="subhead">Villa Serena • Real-time Financial Breakdown</span>
+        </div>
+        <button class="close-btn" onclick="closeCostModal()">✕</button>
+      </div>
+
+      <div class="modal-body" id="costModalContent">
+        <!-- Generated by JavaScript -->
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="window.print()">🖨️ Print Cost Summary</button>
+        <button class="btn btn-primary" onclick="closeCostModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. REQUEST REVISIONS MODAL -->
+  <div class="modal-backdrop" id="revisionModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Request Design Revision</h3>
+        <button class="close-btn" onclick="closeRevisionModal()">✕</button>
+      </div>
+      <p class="modal-instruction">Specify which aspects need modifications so the design team can update the concepts.</p>
+      
+      <div class="form-group">
+        <label>Aspect to Adjust:</label>
+        <div class="tag-selector">
+          <label class="chip"><input type="checkbox" name="revAspect" value="Color Scheme"> Color Scheme</label>
+          <label class="chip"><input type="checkbox" name="revAspect" value="Furniture Layout"> Furniture Layout</label>
+          <label class="chip"><input type="checkbox" name="revAspect" value="Lighting"> Lighting Fixtures</label>
+          <label class="chip"><input type="checkbox" name="revAspect" value="Materials"> Materials & Finishes</label>
+          <label class="chip"><input type="checkbox" name="revAspect" value="Budget"> Budget Optimization</label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="revisionNotes">Detailed Revision Instructions:</label>
+        <textarea id="revisionNotes" rows="4" placeholder="e.g. Please provide a lighter wooden finish for the credenza and replace warm ceiling spots with cove lights." required></textarea>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeRevisionModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="submitRevisionRequest()">Submit Revision Request</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. ADD NEW SPACE MODAL (Replaces prompt()) -->
+  <div class="modal-backdrop" id="addRoomModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Add New Project Space</h3>
+        <button class="close-btn" onclick="closeAddRoomModal()">✕</button>
+      </div>
+      <p class="modal-instruction">Create an additional room or architectural area for client design review.</p>
+
+      <div class="form-group">
+        <label for="newRoomNameInput">Space Name:</label>
+        <input type="text" id="newRoomNameInput" class="form-input" placeholder="e.g. Executive Home Office, Penthouse Terrace, Guest Suite" required>
+      </div>
+
+      <div class="form-group">
+        <label for="newRoomSqftInput">Estimated Area (sq ft):</label>
+        <input type="number" id="newRoomSqftInput" class="form-input" value="240" min="50" max="2000">
+      </div>
+
+      <div class="form-group">
+        <label for="newRoomBudgetInput">Allocated Target Budget ($):</label>
+        <input type="number" id="newRoomBudgetInput" class="form-input" value="22000" min="1000" step="500">
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeAddRoomModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmAddRoomFromModal()">Create Space</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. CLIENT FINAL SIGN-OFF REPORT MODAL -->
+  <div class="modal-backdrop" id="summaryModal">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div>
+          <h3>Client Project Approval Sign-Off Report</h3>
+          <span class="subhead">Villa Serena • PixelX Interior Studios</span>
+        </div>
+        <button class="close-btn" onclick="closeSummaryModal()">✕</button>
+      </div>
+
+      <div class="modal-body" id="summaryModalContent">
+        <!-- Generated by JavaScript -->
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="window.print()">🖨️ Print / Save PDF</button>
+        <button class="btn btn-primary" onclick="closeSummaryModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification System -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts -->
+  <script src="three-viewer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
