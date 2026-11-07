@@ -3,11 +3,11 @@
  * Course Project Submission - Group Sr. No. 4 (Hitansh Arora)
  * 
  * Features:
- * - 3D Interactive Room Studio with Real-time Material Swapping
- * - Dynamic Live Cost & Budget Tracking Engine
+ * - Dynamic Multi-Room 3D Engine: Living Room (Sofa), Bedroom (King Bed), Kitchen (Island)
+ * - Interactive 2D Color Customizer Canvas (Real-time color reflection for walls, floors, fabrics)
+ * - Live Cost & Budget Tracking Engine
  * - Granular 3-Pillar Review: Layout, Materials & Color Scheme
  * - Modal-based Material Inspection (Zero annoying browser alerts)
- * - Client Sign-Off Reports and Audit Log Feedback Threads
  */
 
 // Initial Seed Data showcasing realistic Interior Design project
@@ -21,6 +21,7 @@ const INITIAL_PROJECT_DATA = {
   activeConceptIndex: 0,
   currentRole: "client", // 'client' or 'designer'
   viewportMode: "3d", // '3d' or 'photo'
+  view2DSubMode: "canvas", // 'canvas' or 'photo'
   currentLightingMode: "golden",
   rooms: [
     {
@@ -29,7 +30,7 @@ const INITIAL_PROJECT_DATA = {
       description: "Spacious double-height living lounge with seamless terrace view and natural lighting.",
       sqft: 380,
       baseCost: 28500,
-      status: "under_review", // 'approved' | 'changes_requested' | 'under_review'
+      status: "under_review",
       concepts: [
         {
           name: "Concept A: Japandi Minimalist",
@@ -131,8 +132,9 @@ const INITIAL_PROJECT_DATA = {
           materials: [
             { category: "Wall Finish", name: "Whispering Sand", code: "AP-301", color: "#E8E2D7", supplier: "Farrow & Ball", pricePerSqft: 12, grade: "Estate Emulsion" },
             { category: "Flooring", name: "Natural White Oak Planks", code: "WD-102", color: "#D4C2AA", supplier: "Havwoods", pricePerSqft: 20, grade: "Engineered Plank" },
-            { category: "Headboard", name: "Fluted White Oak Wall", code: "TK-201", color: "#B89B7A", supplier: "Custom Millwork", pricePerSqft: 32, grade: "Acoustic Slat" },
-            { category: "Bed Fabric", name: "Natural Belgian Linen", code: "FB-112", color: "#D7D0C5", supplier: "Libeco Home", pricePerSqft: 38, grade: "100% Organic Flax" }
+            { category: "Headboard Wood", name: "Fluted White Oak Wall", code: "TK-201", color: "#B89B7A", supplier: "Custom Millwork", pricePerSqft: 32, grade: "Acoustic Slat" },
+            { category: "Bedding Fabric", name: "Natural Belgian Linen", code: "FB-112", color: "#D7D0C5", supplier: "Libeco Home", pricePerSqft: 38, grade: "100% Organic Flax" },
+            { category: "Hardware", name: "Brushed Brass Sconces", code: "MT-302", color: "#D4AF37", supplier: "Custom Lighting", pricePerSqft: 25, grade: "Satin Brass" }
           ],
           comments: [
             {
@@ -169,10 +171,11 @@ const INITIAL_PROJECT_DATA = {
           materialStatus: "under_review",
           lightingMode: "day",
           materials: [
-            { category: "Cabinetry", name: "Fenix NTM Matte Black", code: "FN-0720", color: "#22252A", supplier: "Arpa Industriale", pricePerSqft: 40, grade: "Thermal Healing Nano" },
-            { category: "Countertop", name: "Calacatta Gold Quartz", code: "QZ-880", color: "#F7F5F0", supplier: "Caesarstone", pricePerSqft: 55, grade: "Non-porous NSF Cert" },
-            { category: "Backsplash", name: "Smoked Gray Terrazzo", code: "TZ-302", color: "#A8A49D", supplier: "Agglotech Italy", pricePerSqft: 26, grade: "Honed Satin Tile" },
-            { category: "Flooring", name: "Continuous Micro-Cement", code: "MC-101", color: "#B8B3AB", supplier: "Ideal Work", pricePerSqft: 18, grade: "Seamless Water-Resistant" }
+            { category: "Cabinetry Finish", name: "Fenix NTM Matte Black", code: "FN-0720", color: "#22252A", supplier: "Arpa Industriale", pricePerSqft: 40, grade: "Thermal Healing Nano" },
+            { category: "Countertop Quartz", name: "Calacatta Gold Quartz", code: "QZ-880", color: "#F7F5F0", supplier: "Caesarstone", pricePerSqft: 55, grade: "Non-porous NSF Cert" },
+            { category: "Flooring", name: "Continuous Micro-Cement", code: "MC-101", color: "#B8B3AB", supplier: "Ideal Work", pricePerSqft: 18, grade: "Seamless Water-Resistant" },
+            { category: "Barstool Fabric", name: "Caramel Saddle Leather", code: "FB-405", color: "#9E6843", supplier: "Pelle Frau", pricePerSqft: 42, grade: "Full Grain Tuscan" },
+            { category: "Linear Lighting", name: "Brushed Champagne Brass", code: "MT-105", color: "#CBB17C", supplier: "Custom Studio", pricePerSqft: 30, grade: "Linear LED Bar" }
           ],
           comments: [
             {
@@ -221,13 +224,23 @@ function resetDemoData() {
   }
 }
 
+// Helper: Determine Room Type
+function getRoomType(room) {
+  if (!room) return "living";
+  const rId = (room.id || "").toLowerCase();
+  const rName = (room.name || "").toLowerCase();
+  if (rId.includes("bed") || rName.includes("bed")) return "bedroom";
+  if (rId.includes("kitchen") || rName.includes("kitchen") || rId.includes("cook")) return "kitchen";
+  if (rId.includes("office") || rName.includes("office") || rName.includes("study")) return "office";
+  return "living";
+}
+
 // --- COST & BUDGET CALCULATIONS ---
 function calculateRoomCost(room, conceptIndex = 0) {
   const concept = room.concepts[conceptIndex] || room.concepts[0];
   let cost = room.baseCost || 25000;
 
-  // Add material adjustments based on active specifications
-  if (concept.materials) {
+  if (concept && concept.materials) {
     concept.materials.forEach(mat => {
       const rate = mat.pricePerSqft || 20;
       cost += Math.round((room.sqft || 250) * rate * 0.12);
@@ -243,7 +256,7 @@ function calculateProjectTotal() {
   }, 0);
 }
 
-// --- 3D VIEWER INITIALIZATION & SYNC ---
+// --- 3D VIEWER INITIALIZATION & DYNAMIC SYNC ---
 function init3DViewer() {
   const container = document.getElementById("three-canvas-container");
   if (!container) return;
@@ -260,37 +273,220 @@ function init3DViewer() {
 }
 
 function sync3DViewerMaterials() {
-  if (!viewer) return;
-
   const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
   if (!currentRoom) return;
 
   const activeConcept = currentRoom.concepts[state.activeConceptIndex] || currentRoom.concepts[0];
+  const roomType = getRoomType(currentRoom);
 
   let wallColor = "#F0ECE1";
   let floorColor = "#CBB69D";
   let sofaColor = "#D7CFC7";
+  let accentWoodColor = "#8E5A3C";
   let accentColor = "#CBB17C";
 
-  if (activeConcept.materials) {
+  if (activeConcept && activeConcept.materials) {
     activeConcept.materials.forEach(mat => {
       const cat = (mat.category || "").toLowerCase();
-      if (cat.includes("wall")) wallColor = mat.color;
+      if (cat.includes("wall") || cat.includes("paint")) wallColor = mat.color;
       else if (cat.includes("floor") || cat.includes("cement")) floorColor = mat.color;
-      else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("cabinet")) sofaColor = mat.color;
-      else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter")) accentColor = mat.color;
+      else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("fabric") || cat.includes("linen")) sofaColor = mat.color;
+      else if (cat.includes("wood") || cat.includes("cabinet") || cat.includes("teak") || cat.includes("slat") || cat.includes("headboard")) accentWoodColor = mat.color;
+      else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter") || cat.includes("trim")) accentColor = mat.color;
     });
   }
 
-  viewer.applyMaterials({
+  const selections = {
     wallColor: wallColor,
     floorColor: floorColor,
     sofaColor: sofaColor,
+    accentWoodColor: accentWoodColor,
     accentColor: accentColor,
     lightingMode: state.currentLightingMode || activeConcept.lightingMode || "golden"
-  });
+  };
+
+  // 1. Update 3D Model Room Type & Materials
+  if (viewer) {
+    if (viewer.currentRoomType !== roomType) {
+      viewer.setRoomType(roomType, selections);
+    } else {
+      viewer.applyMaterials(selections);
+    }
+  }
+
+  // 2. Update 2D Interactive Canvas Model with chosen colors!
+  render2DColorCustomizerCanvas(roomType, selections);
 }
 
+// --- 2D INTERACTIVE COLOR CUSTOMIZER CANVAS ---
+function render2DColorCustomizerCanvas(roomType, selections) {
+  const canvas = document.getElementById("photo2DCanvas");
+  if (!canvas) return;
+
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width || 800;
+  canvas.height = rect.height || 480;
+
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Background
+  ctx.fillStyle = "#121620";
+  ctx.fillRect(0, 0, w, h);
+
+  const rx = w * 0.1, ry = h * 0.08;
+  const rw = w * 0.8, rh = h * 0.84;
+
+  // 1. Flooring (reflects chosen floor color!)
+  ctx.fillStyle = selections.floorColor || "#CBB69D";
+  ctx.fillRect(rx, ry, rw, rh);
+
+  // Floor plank lines
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
+  ctx.lineWidth = 1;
+  for (let x = rx; x < rx + rw; x += 26) {
+    ctx.beginPath();
+    ctx.moveTo(x, ry);
+    ctx.lineTo(x, ry + rh);
+    ctx.stroke();
+  }
+
+  // 2. Walls (reflects chosen wall paint color!)
+  ctx.strokeStyle = selections.wallColor || "#F0ECE1";
+  ctx.lineWidth = 18;
+  ctx.strokeRect(rx, ry, rw, rh);
+
+  // Large Window on right
+  ctx.strokeStyle = "#4da3ff";
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(rx + rw, ry + rh * 0.2);
+  ctx.lineTo(rx + rw, ry + rh * 0.8);
+  ctx.stroke();
+
+  // 3. Room-Specific Furniture Layout
+  if (roomType === "bedroom") {
+    // Large Area Rug
+    ctx.fillStyle = "rgba(235, 230, 222, 0.8)";
+    const rugX = rx + rw * 0.16, rugY = ry + rh * 0.14, rugW = rw * 0.68, rugH = rh * 0.72;
+    ctx.fillRect(rugX, rugY, rugW, rugH);
+
+    // Fluted Headboard Wall
+    ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
+    ctx.fillRect(rx + rw * 0.22, ry + 12, rw * 0.56, 28);
+
+    // Bed Frame
+    ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
+    const bedX = rx + rw * 0.28, bedY = ry + rh * 0.16, bedW = rw * 0.44, bedH = rh * 0.56;
+    ctx.fillRect(bedX, bedY, bedW, bedH);
+
+    // Duvet / Bedding (Takes chosen bed fabric color!)
+    ctx.fillStyle = selections.sofaColor || "#D7CFC7";
+    ctx.fillRect(bedX + 10, bedY + 38, bedW - 20, bedH - 48);
+    ctx.strokeStyle = "#2b2b2b";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bedX + 10, bedY + 38, bedW - 20, bedH - 48);
+
+    // Bed Pillows
+    ctx.fillStyle = "#ffffff";
+    const pW = (bedW - 50) / 2;
+    ctx.fillRect(bedX + 16, bedY + 10, pW, 24);
+    ctx.fillRect(bedX + 16 + pW + 18, bedY + 10, pW, 24);
+
+    // Floating Nightstands
+    ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
+    ctx.fillRect(bedX - 44, bedY + 12, 36, 42);
+    ctx.fillRect(bedX + bedW + 8, bedY + 12, 36, 42);
+  } else if (roomType === "kitchen") {
+    // Rear Cabinetry Millwork Wall
+    ctx.fillStyle = selections.accentWoodColor || "#22252A";
+    ctx.fillRect(rx + 12, ry + 12, rw - 24, 55);
+    ctx.strokeStyle = "#444444";
+    ctx.strokeRect(rx + 12, ry + 12, rw - 24, 55);
+
+    // Waterfall Island (Takes Quartz Countertop / Accent color!)
+    const islX = rx + rw * 0.22, islY = ry + rh * 0.4, islW = rw * 0.56, islH = rh * 0.34;
+    ctx.fillStyle = "#fcfaf6";
+    ctx.fillRect(islX, islY, islW, islH);
+    ctx.strokeStyle = selections.accentColor || "#CBB17C";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(islX, islY, islW, islH);
+
+    // Island Undermount Sink
+    ctx.fillStyle = "#22252A";
+    ctx.fillRect(islX + islW * 0.18, islY + 14, islW * 0.22, islH * 0.45);
+
+    // 3 Bar Stools (Take upholstery color!)
+    ctx.fillStyle = selections.sofaColor || "#D7CFC7";
+    const stoolR = Math.min(rw, rh) * 0.052;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(islX + (i + 1) * (islW / 4), islY + islH + 28, stoolR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#1a1a1a";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  } else {
+    // Living Room: Rug, Sectional Sofa, Coffee Table
+    ctx.fillStyle = "rgba(235, 230, 222, 0.75)";
+    const rugX = rx + rw * 0.18, rugY = ry + rh * 0.18, rugW = rw * 0.64, rugH = rh * 0.64;
+    ctx.fillRect(rugX, rugY, rugW, rugH);
+
+    // Sectional Sofa (Takes chosen upholstery color!)
+    ctx.fillStyle = selections.sofaColor || "#D7CFC7";
+    const sofaX = rugX + rugW * 0.1, sofaY = rugY + rugH * 0.12, sofaW = rugW * 0.8, sofaH = rugH * 0.38;
+    ctx.fillRect(sofaX, sofaY, sofaW, sofaH);
+    ctx.strokeStyle = "#222222";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sofaX, sofaY, sofaW, sofaH);
+
+    // Cushions
+    ctx.fillStyle = "rgba(0,0,0,0.06)";
+    const cW = sofaW / 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.strokeRect(sofaX + i * cW, sofaY, cW, sofaH);
+    }
+
+    // Coffee Table (Takes accent color!)
+    ctx.fillStyle = "#faf6f0";
+    ctx.beginPath();
+    ctx.arc(rugX + rugW * 0.5, rugY + rugH * 0.72, Math.min(rw, rh) * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = selections.accentColor || "#CBB17C";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  // 4. Lighting tint overlay
+  if (selections.lightingMode === "golden") {
+    ctx.fillStyle = "rgba(255, 170, 70, 0.12)";
+    ctx.fillRect(0, 0, w, h);
+  } else if (selections.lightingMode === "night") {
+    ctx.fillStyle = "rgba(10, 18, 40, 0.35)";
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Active Palette HUD in corner
+  ctx.fillStyle = "rgba(18, 24, 38, 0.92)";
+  ctx.fillRect(rx + 15, ry + 15, 270, 68);
+  ctx.strokeStyle = "#C29D59";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rx + 15, ry + 15, 270, 68);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
+  const spaceLabel = roomType === "bedroom" ? "2D Master Bedroom Customizer" : roomType === "kitchen" ? "2D Modular Kitchen Customizer" : "2D Living Room Customizer";
+  ctx.fillText(spaceLabel, rx + 25, ry + 36);
+
+  ctx.fillStyle = "#C29D59";
+  ctx.font = "11px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText(`Wall: ${selections.wallColor}  •  Floor: ${selections.floorColor}`, rx + 25, ry + 54);
+  ctx.fillText(`Fabric: ${selections.sofaColor}  •  Wood: ${selections.accentWoodColor}`, rx + 25, ry + 70);
+}
+
+// --- VIEWPORT MODES ---
 function switchViewportMode(mode) {
   state.viewportMode = mode;
   const is3D = mode === "3d";
@@ -317,9 +513,39 @@ function switchViewportMode(mode) {
       viewer.onResize();
       sync3DViewerMaterials();
     }, 50);
+  } else {
+    // Redraw 2D canvas
+    sync3DViewerMaterials();
   }
 
   saveData(state);
+}
+
+function switch2DSubTab(subMode) {
+  state.view2DSubMode = subMode;
+  const isCanvas = subMode === "canvas";
+
+  const btnCanvas = document.getElementById("btn2DCanvasTab");
+  const btnPhoto = document.getElementById("btn2DPhotoTab");
+  const canvasWrap = document.getElementById("view2DCanvasWrap");
+  const photoWrap = document.getElementById("view2DPhotoWrap");
+  const note = document.getElementById("photoSubNote");
+
+  if (btnCanvas) btnCanvas.classList.toggle("active", isCanvas);
+  if (btnPhoto) btnPhoto.classList.toggle("active", !isCanvas);
+
+  if (canvasWrap) canvasWrap.style.display = isCanvas ? "block" : "none";
+  if (photoWrap) photoWrap.style.display = isCanvas ? "none" : "block";
+
+  if (note) {
+    note.innerText = isCanvas
+      ? "Wall, floor & furniture colors change live with swatches"
+      : "Original high-resolution architectural moodboard photo";
+  }
+
+  if (isCanvas) {
+    sync3DViewerMaterials();
+  }
 }
 
 function setViewerCamera(camType) {
@@ -330,16 +556,10 @@ function setViewerCamera(camType) {
     if (el) el.classList.remove("active");
   });
 
-  if (camType === "perspective") {
-    const el = document.getElementById("btnCamPersp");
-    if (el) el.classList.add("active");
-  } else if (camType === "isometric") {
-    const el = document.getElementById("btnCamIso");
-    if (el) el.classList.add("active");
-  } else if (camType === "topdown") {
-    const el = document.getElementById("btnCamTop");
-    if (el) el.classList.add("active");
-  }
+  const btn = document.getElementById(
+    camType === "perspective" ? "btnCamPersp" : camType === "isometric" ? "btnCamIso" : "btnCamTop"
+  );
+  if (btn) btn.classList.add("active");
 }
 
 function setViewerLighting(mode) {
@@ -356,6 +576,7 @@ function setViewerLighting(mode) {
   );
   if (activeBtn) activeBtn.classList.add("active");
 
+  sync3DViewerMaterials();
   saveData(state);
 }
 
@@ -364,10 +585,10 @@ function renderApp() {
   const currentRoom = state.rooms.find(r => r.id === state.activeRoomId) || state.rooms[0];
   const activeConcept = currentRoom.concepts[state.activeConceptIndex] || currentRoom.concepts[0];
 
-  // 1. Header info
+  // 1. Header
   document.getElementById("projectName").innerText = state.projectName;
 
-  // 2. Project Stats & Budget Banner
+  // 2. Budget Banner
   const totalCost = calculateProjectTotal();
   const targetBudget = state.targetBudget;
   const approvedCount = state.rooms.filter(r => r.status === "approved").length;
@@ -398,7 +619,7 @@ function renderApp() {
     }
   }
 
-  // 3. Left Sidebar Room Navigation
+  // 3. Room Navigation List
   renderRoomList();
 
   // 4. Room Header & Meta
@@ -409,35 +630,28 @@ function renderApp() {
   roomBadge.className = `status-badge badge-${currentRoom.status}`;
   roomBadge.innerText = formatStatus(currentRoom.status);
 
-  // 5. Concept Option Pills
+  // 5. Concept Options
   renderConceptOptions(currentRoom);
 
-  // 6. Viewport Renders (Photo mode)
+  // 6. Viewport Renders
   document.getElementById("activeRenderImg").src = activeConcept.image;
   document.getElementById("renderConceptBadge").innerText = activeConcept.name;
   document.getElementById("renderRevisionVersion").innerText = activeConcept.version || "v2.0";
 
-  // Thumbnails gallery
   renderAnglesGallery(activeConcept);
-
-  // 7. Granular 3-Pillar Review Engine
   renderPillars(activeConcept);
-
-  // 8. Material Swatches
   renderSwatches(activeConcept);
 
-  // 9. Cost Summary Card
+  // 7. Cost Summary Card
   const roomCost = calculateRoomCost(currentRoom, state.activeConceptIndex);
   document.getElementById("roomEstimatedCost").innerText = `$${roomCost.toLocaleString()}`;
   document.getElementById("roomSqftSubtext").innerText = `${currentRoom.sqft || 380} sq ft • Includes custom millwork, soft furnishings & labor`;
 
-  // 10. Decision Status Box
+  // 8. Decision Box & Comments
   renderDecisionBox(activeConcept);
-
-  // 11. Comments Thread
   renderCommentsFeed(activeConcept);
 
-  // 12. Sync 3D scene
+  // 9. Sync 3D & 2D Models!
   sync3DViewerMaterials();
 }
 
@@ -465,7 +679,6 @@ function renderRoomList() {
     nav.appendChild(li);
   });
 
-  // Overall badge
   const approved = state.rooms.filter(r => r.status === "approved").length;
   document.getElementById("overallApprovalBadge").innerText = `${approved}/${state.rooms.length} Approved`;
   const pct = Math.round((approved / state.rooms.length) * 100);
@@ -480,7 +693,7 @@ function selectRoom(roomId) {
   renderApp();
 
   const room = state.rooms.find(r => r.id === roomId);
-  showToast(`Viewing ${room.name}`, "info");
+  showToast(`Switched to ${room.name} (${getRoomType(room).toUpperCase()})`, "info");
 }
 
 function renderConceptOptions(currentRoom) {
@@ -511,7 +724,7 @@ function renderAnglesGallery(activeConcept) {
       img.src = thumbUrl;
       img.className = `angle-thumb ${idx === 0 ? "active" : ""}`;
       img.title = `Camera Angle ${idx + 1}`;
-      img.onclick = (e) => {
+      img.onclick = () => {
         document.querySelectorAll(".angle-thumb").forEach(t => t.classList.remove("active"));
         img.classList.add("active");
         document.getElementById("activeRenderImg").src = thumbUrl;
@@ -595,7 +808,7 @@ function togglePillarStatus(pillarKey, newStatus) {
   showToast(`Updated ${pillarNameMap[pillarKey]} to ${formatStatus(newStatus)}`, "success");
 }
 
-// --- MATERIAL SWATCHES & MODAL INSPECTION (REPLACING ALERTS) ---
+// --- MATERIAL SWATCHES & MODAL INSPECTION ---
 function renderSwatches(activeConcept) {
   const grid = document.getElementById("swatchesGrid");
   grid.innerHTML = "";
@@ -615,7 +828,7 @@ function renderSwatches(activeConcept) {
       </div>
     `;
 
-    // Click opens elegant modal instead of browser alert()!
+    // Click opens modal AND immediately highlights & tests
     card.onclick = () => openMaterialModal(mat, card);
     grid.appendChild(card);
   });
@@ -624,9 +837,11 @@ function renderSwatches(activeConcept) {
 function openMaterialModal(mat, cardElement) {
   selectedMaterialForModal = mat;
 
-  // Highlight active swatch in UI
   document.querySelectorAll(".swatch-card").forEach(c => c.classList.remove("active-swatch"));
   if (cardElement) cardElement.classList.add("active-swatch");
+
+  // Instantly apply to 3D and 2D models
+  applySingleMaterialLive(mat);
 
   // Populate modal data
   document.getElementById("matModalTitle").innerText = mat.name;
@@ -641,13 +856,30 @@ function openMaterialModal(mat, cardElement) {
   document.getElementById("matModalGrade").innerText = mat.grade || "Commercial & Residential Grade";
   document.getElementById("matModalLeadTime").innerText = "2-3 Weeks Direct Stock";
 
-  // Open modal
   document.getElementById("materialModal").classList.add("open");
 }
 
 function closeMaterialModal() {
   document.getElementById("materialModal").classList.remove("open");
   selectedMaterialForModal = null;
+}
+
+function applySingleMaterialLive(mat) {
+  if (!mat) return;
+  const cat = (mat.category || "").toLowerCase();
+
+  const updates = {};
+  if (cat.includes("wall") || cat.includes("paint")) updates.wallColor = mat.color;
+  else if (cat.includes("floor") || cat.includes("cement")) updates.floorColor = mat.color;
+  else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("fabric") || cat.includes("linen")) updates.sofaColor = mat.color;
+  else if (cat.includes("wood") || cat.includes("cabinet") || cat.includes("teak") || cat.includes("slat") || cat.includes("headboard")) updates.accentWoodColor = mat.color;
+  else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter") || cat.includes("trim")) updates.accentColor = mat.color;
+
+  if (viewer) viewer.applyMaterials(updates);
+
+  // Also update 2D canvas live!
+  const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
+  render2DColorCustomizerCanvas(getRoomType(currentRoom), { ...viewer.currentSelections, ...updates });
 }
 
 function confirmApplyMaterialFromModal() {
@@ -657,20 +889,21 @@ function confirmApplyMaterialFromModal() {
   const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
   const activeConcept = currentRoom.concepts[state.activeConceptIndex];
 
-  // Update 3D Viewer directly
-  if (viewer) {
-    const cat = (mat.category || "").toLowerCase();
-    if (cat.includes("wall")) viewer.applyMaterials({ wallColor: mat.color });
-    else if (cat.includes("floor") || cat.includes("cement")) viewer.applyMaterials({ floorColor: mat.color });
-    else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("cabinet")) viewer.applyMaterials({ sofaColor: mat.color });
-    else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone")) viewer.applyMaterials({ accentColor: mat.color });
+  // Persist into concept materials
+  const existing = activeConcept.materials.find(m => m.category === mat.category);
+  if (existing) {
+    existing.color = mat.color;
+    existing.name = mat.name;
+    existing.code = mat.code;
   }
 
+  saveData(state);
+  applySingleMaterialLive(mat);
   closeMaterialModal();
-  showToast(`Applied ${mat.name} to 3D room model & concept specifications.`, "success");
+  showToast(`Applied ${mat.name} to 3D and 2D models.`, "success");
 }
 
-// --- ITEMISED COST BREAKDOWN MODAL ---
+// --- ITEMIZED COST BREAKDOWN MODAL ---
 function openCostModal() {
   const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
   const activeConcept = currentRoom.concepts[state.activeConceptIndex];
@@ -683,8 +916,8 @@ function openCostModal() {
   const lines = [
     { item: "Flooring Package", spec: "White Oak Herringbone / Engineered Wood", qty: `${currentRoom.sqft} sq ft`, rate: "$22/sq ft", sub: Math.round(currentRoom.sqft * 22) },
     { item: "Architectural Wall Finishes", spec: "Velvet Wash / Acoustic Slat Panels", qty: `${Math.round(currentRoom.sqft * 2.2)} sq ft`, rate: "$12/sq ft", sub: Math.round(currentRoom.sqft * 2.2 * 12) },
-    { item: "Bespoke Furnishings & Seating", spec: "Custom Sectional Sofa, Coffee Table & Rug", qty: "1 Suite", rate: "Custom Spec", sub: Math.round(activeConcept.materials ? 14500 : 12000) },
-    { item: "Custom Architectural Millwork", spec: "Fluted Slats, Built-in TV Credenza, Baseboards", qty: "Custom Joinery", rate: "Trade Schedule", sub: 6500 },
+    { item: "Bespoke Furnishings & Seating", spec: "Custom Bed / Sectional Sofa / Island Suite", qty: "1 Suite", rate: "Custom Spec", sub: Math.round(activeConcept.materials ? 14500 : 12000) },
+    { item: "Custom Architectural Millwork", spec: "Fluted Slats, Built-in Headboard / Cabinetry", qty: "Custom Joinery", rate: "Trade Schedule", sub: 6500 },
     { item: "Lighting Fixtures & Electrical", spec: "Chandelier, Floor Lamp, Dimmable Cove LEDs", qty: "1 Package", rate: "UL Certified", sub: 3200 },
     { item: "Skilled Trade Labor & Installation", spec: "Leveling, Fitting, White-Glove Installation", qty: "Comprehensive", rate: "Contractor Fee", sub: Math.round(roomCost * 0.15) }
   ];
@@ -761,7 +994,7 @@ function renderDecisionBox(activeConcept) {
     box.className = "decision-status-box";
     icon.innerText = "⏳";
     title.innerText = "Awaiting Client Sign-Off";
-    sub.innerText = "Review 3D layout, colors, and finish swatches below.";
+    sub.innerText = "Review 3D/2D layout, colors, and finish swatches below.";
   }
 }
 
@@ -886,7 +1119,7 @@ function handlePostComment(e) {
   showToast("Feedback note posted.", "info");
 }
 
-// --- ADD NEW SPACE MODAL (REPLACING NATIVE PROMPT) ---
+// --- ADD NEW SPACE MODAL ---
 function openAddRoomModal() {
   document.getElementById("addRoomModal").classList.add("open");
 }
@@ -954,7 +1187,6 @@ function confirmAddRoomFromModal() {
 function openSummaryModal() {
   const container = document.getElementById("summaryModalContent");
   const totalCost = calculateProjectTotal();
-  const approved = state.rooms.filter(r => r.status === "approved").length;
 
   let rowsHtml = "";
   state.rooms.forEach(room => {

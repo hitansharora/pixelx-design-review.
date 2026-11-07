@@ -184,11 +184,32 @@
             <!-- 1. Three.js Interactive 3D Container -->
             <div id="three-canvas-container" class="three-canvas-wrap"></div>
 
-            <!-- 2. 2D Photo Render View (when Photo mode is chosen) -->
+            <!-- 2. 2D Concept Model & Renders View -->
             <div id="photoRenderWrap" class="photo-render-wrap" style="display: none;">
-              <img id="activeRenderImg" src="" alt="Room Concept Preview" class="render-image">
-              <div class="render-overlay-badge" id="renderConceptBadge">Option A: Japandi Minimalist</div>
-              <div class="revision-indicator" id="renderRevisionVersion">Version 2.0</div>
+              <!-- 2D View Sub-Navigation -->
+              <div class="photo-sub-nav">
+                <div class="photo-sub-tabs">
+                  <button id="btn2DCanvasTab" class="photo-sub-btn active" onclick="switch2DSubTab('canvas')">
+                    🎨 2D Interactive Color Customizer
+                  </button>
+                  <button id="btn2DPhotoTab" class="photo-sub-btn" onclick="switch2DSubTab('photo')">
+                    📸 Reference Photo Gallery
+                  </button>
+                </div>
+                <span class="photo-sub-note" id="photoSubNote">Wall, floor & furniture colors change live with swatches</span>
+              </div>
+
+              <!-- 2D Interactive Canvas (Live Color Customizer) -->
+              <div id="view2DCanvasWrap" class="canvas-2d-viewport">
+                <canvas id="photo2DCanvas" class="canvas-2d-screen"></canvas>
+              </div>
+
+              <!-- Reference Photo Render -->
+              <div id="view2DPhotoWrap" class="photo-actual-wrap" style="display: none;">
+                <img id="activeRenderImg" src="" alt="Room Concept Preview" class="render-image">
+                <div class="render-overlay-badge" id="renderConceptBadge">Option A: Japandi Minimalist</div>
+                <div class="revision-indicator" id="renderRevisionVersion">Version 2.0</div>
+              </div>
             </div>
 
             <!-- Floating 3D Interaction Hint -->
