@@ -159,7 +159,7 @@
                   🛋️ 3D Interactive Studio
                 </button>
                 <button id="btnViewPhoto" class="view-tab-btn" onclick="switchViewportMode('photo')">
-                  📷 2D Concept Photos
+                  🎨 2D Concept Studio
                 </button>
               </div>
 
@@ -179,6 +179,22 @@
                   <button class="pill-btn" id="btnLightNight" onclick="setViewerLighting('night')" title="Evening Ambient">🌙 Night</button>
                 </div>
               </div>
+
+              <!-- 2D Controls Toolbar (Live Color Studio vs Editorial Photo & Lighting) -->
+              <div class="viewport-2d-controls" id="viewport2DControls" style="display: none;">
+                <!-- 2D View Sub-Modes -->
+                <div class="btn-group-pill">
+                  <button class="pill-btn active" id="btn2DCanvasTab" onclick="switch2DSubTab('canvas')" title="2D Interactive Color Customizer">🎨 2D Studio</button>
+                  <button class="pill-btn" id="btn2DPhotoTab" onclick="switch2DSubTab('photo')" title="Editorial Concept Moodboard Photo">📸 Editorial Photo</button>
+                </div>
+                <div class="bar-divider"></div>
+                <!-- Lighting Presets (Synced) -->
+                <div class="btn-group-pill">
+                  <button class="pill-btn" id="btn2DLightDay" onclick="setViewerLighting('day')" title="Crisp Daylight">☀️ Day</button>
+                  <button class="pill-btn active" id="btn2DLightGolden" onclick="setViewerLighting('golden')" title="Golden Hour Warmth">🌅 Golden</button>
+                  <button class="pill-btn" id="btn2DLightNight" onclick="setViewerLighting('night')" title="Evening Ambient">🌙 Night</button>
+                </div>
+              </div>
             </div>
 
             <!-- 1. Three.js Interactive 3D Container -->
@@ -186,39 +202,31 @@
 
             <!-- 2. 2D Concept Model & Renders View -->
             <div id="photoRenderWrap" class="photo-render-wrap" style="display: none;">
-              <!-- 2D View Sub-Navigation -->
-              <div class="photo-sub-nav">
-                <div class="photo-sub-tabs">
-                  <button id="btn2DCanvasTab" class="photo-sub-btn active" onclick="switch2DSubTab('canvas')">
-                    🎨 2D Interactive Color Customizer
-                  </button>
-                  <button id="btn2DPhotoTab" class="photo-sub-btn" onclick="switch2DSubTab('photo')">
-                    📸 Reference Photo Gallery
-                  </button>
-                </div>
-                <span class="photo-sub-note" id="photoSubNote">Wall, floor & furniture colors change live with swatches</span>
-              </div>
-
-              <!-- 2D Interactive Canvas (Live Color Customizer) -->
+              <!-- 2D Interactive Canvas (Live Architectural Color Studio) -->
               <div id="view2DCanvasWrap" class="canvas-2d-viewport">
                 <canvas id="photo2DCanvas" class="canvas-2d-screen"></canvas>
+                <!-- HUD Pill in Bottom-Left -->
+                <div class="canvas-hud-pill" id="canvasHudPill"></div>
               </div>
 
-              <!-- Reference Photo Render -->
+              <!-- Reference Editorial Photo Render -->
               <div id="view2DPhotoWrap" class="photo-actual-wrap" style="display: none;">
                 <img id="activeRenderImg" src="" alt="Room Concept Preview" class="render-image">
+                <div class="photo-tint-overlay" id="photoTintOverlay"></div>
+                <!-- Interactive Material Callout Hotspots -->
+                <div id="photoHotspotsContainer" class="photo-hotspots-container"></div>
                 <div class="render-overlay-badge" id="renderConceptBadge">Option A: Japandi Minimalist</div>
                 <div class="revision-indicator" id="renderRevisionVersion">Version 2.0</div>
               </div>
             </div>
 
-            <!-- Floating 3D Interaction Hint -->
+            <!-- Floating Viewport Interaction Hint -->
             <div class="viewport-interactive-hint" id="viewport3DHint">
               ✨ Rotate & pan with mouse. Click any material swatch below to customize the 3D model in real time!
             </div>
           </div>
 
-          <!-- Thumbnail Gallery for multiple angles (Photo Mode) -->
+          <!-- Thumbnail Gallery for multiple angles / views -->
           <div class="angles-gallery" id="anglesGallery" style="display: none;">
             <!-- Populated by JS -->
           </div>

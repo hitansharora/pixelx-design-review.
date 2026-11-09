@@ -22,6 +22,7 @@ const INITIAL_PROJECT_DATA = {
   currentRole: "client", // 'client' or 'designer'
   viewportMode: "3d", // '3d' or 'photo'
   view2DSubMode: "canvas", // 'canvas' or 'photo'
+  view2DAngle: "perspective", // 'perspective' | 'isometric' | 'topdown'
   currentLightingMode: "golden",
   rooms: [
     {
@@ -202,7 +203,11 @@ function loadData() {
   const saved = localStorage.getItem("pixelx_design_review_state");
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      if (!parsed.view2DSubMode) parsed.view2DSubMode = "canvas";
+      if (!parsed.view2DAngle) parsed.view2DAngle = "perspective";
+      if (!parsed.currentLightingMode) parsed.currentLightingMode = "golden";
+      return parsed;
     } catch (e) {
       console.warn("Failed to parse saved state, using seed data.", e);
     }
@@ -290,9 +295,9 @@ function sync3DViewerMaterials() {
       const cat = (mat.category || "").toLowerCase();
       if (cat.includes("wall") || cat.includes("paint")) wallColor = mat.color;
       else if (cat.includes("floor") || cat.includes("cement")) floorColor = mat.color;
-      else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("fabric") || cat.includes("linen")) sofaColor = mat.color;
+      else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("fabric") || cat.includes("linen") || cat.includes("leather")) sofaColor = mat.color;
       else if (cat.includes("wood") || cat.includes("cabinet") || cat.includes("teak") || cat.includes("slat") || cat.includes("headboard")) accentWoodColor = mat.color;
-      else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter") || cat.includes("trim")) accentColor = mat.color;
+      else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter") || cat.includes("trim") || cat.includes("quartz")) accentColor = mat.color;
     });
   }
 
@@ -307,186 +312,1016 @@ function sync3DViewerMaterials() {
 
   // 1. Update 3D Model Room Type & Materials
   if (viewer) {
-    if (viewer.currentRoomType !== roomType) {
-      viewer.setRoomType(roomType, selections);
-    } else {
-      viewer.applyMaterials(selections);
+    try {
+      if (viewer.currentRoomType !== roomType) {
+        viewer.setRoomType(roomType, selections);
+      } else {
+        viewer.applyMaterials(selections);
+      }
+    } catch (e) {
+      console.warn("3D viewer update error:", e);
     }
   }
 
-  // 2. Update 2D Interactive Canvas Model with chosen colors!
-  render2DColorCustomizerCanvas(roomType, selections);
+  // 2. Update 2D Interactive Architectural Canvas Model with chosen colors & angle!
+  render2DColorCustomizerCanvas(roomType, selections, state.view2DAngle || "perspective");
+
+  // 3. Update Reference Photo Hotspots & Lighting Tint!
+  renderPhotoHotspots(activeConcept, selections);
 }
 
-// --- 2D INTERACTIVE COLOR CUSTOMIZER CANVAS ---
-function render2DColorCustomizerCanvas(roomType, selections) {
+// Helper: Color Math Utility
+function adjustBrightness(hex, percent) {
+  if (!hex || hex[0] !== "#") return hex || "#888888";
+  let num = parseInt(hex.slice(1), 16);
+  if (hex.length === 4) {
+    num = parseInt(hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3], 16);
+  }
+  let r = (num >> 16) + Math.round(255 * (percent / 100));
+  let g = ((num >> 8) & 0x00ff) + Math.round(255 * (percent / 100));
+  let b = (num & 0x0000ff) + Math.round(255 * (percent / 100));
+  r = Math.min(255, Math.max(0, r));
+  g = Math.min(255, Math.max(0, g));
+  b = Math.min(255, Math.max(0, b));
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+// --- 2D ARCHITECTURAL CANVAS ENGINE ---
+function render2DColorCustomizerCanvas(roomType, selections, angleMode = "perspective") {
   const canvas = document.getElementById("photo2DCanvas");
   if (!canvas) return;
 
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width || 800;
-  canvas.height = rect.height || 480;
+  const parent = canvas.parentElement;
+  const rect = parent ? parent.getBoundingClientRect() : null;
+  const dpr = window.devicePixelRatio || 1;
+  const displayW = (rect && rect.width > 0) ? rect.width : (parent ? parent.clientWidth || 800 : 800);
+  const displayH = (rect && rect.height > 0) ? rect.height : 480;
+
+  canvas.width = Math.round(displayW * dpr);
+  canvas.height = Math.round(displayH * dpr);
 
   const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  const w = displayW;
+  const h = displayH;
 
   // Background
-  ctx.fillStyle = "#121620";
+  ctx.fillStyle = "#10131a";
   ctx.fillRect(0, 0, w, h);
 
-  const rx = w * 0.1, ry = h * 0.08;
-  const rw = w * 0.8, rh = h * 0.84;
-
-  // 1. Flooring (reflects chosen floor color!)
-  ctx.fillStyle = selections.floorColor || "#CBB69D";
-  ctx.fillRect(rx, ry, rw, rh);
-
-  // Floor plank lines
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
-  ctx.lineWidth = 1;
-  for (let x = rx; x < rx + rw; x += 26) {
-    ctx.beginPath();
-    ctx.moveTo(x, ry);
-    ctx.lineTo(x, ry + rh);
-    ctx.stroke();
+  if (angleMode === "topdown") {
+    drawBlueprintView(ctx, w, h, roomType, selections);
+  } else if (angleMode === "isometric") {
+    drawIsometricView(ctx, w, h, roomType, selections);
+  } else {
+    drawPerspectiveView(ctx, w, h, roomType, selections);
   }
 
-  // 2. Walls (reflects chosen wall paint color!)
-  ctx.strokeStyle = selections.wallColor || "#F0ECE1";
-  ctx.lineWidth = 18;
-  ctx.strokeRect(rx, ry, rw, rh);
+  // 4. Update Floating HUD Pill
+  const hud = document.getElementById("canvasHudPill");
+  if (hud) {
+    const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
+    const roomName = currentRoom ? currentRoom.name : "Studio";
+    const sqft = currentRoom ? currentRoom.sqft || 320 : 320;
+    const lightIcon = selections.lightingMode === "golden" ? "🌅 Golden" : (selections.lightingMode === "night" ? "🌙 Night" : "☀️ Day");
+    const angleLabel = angleMode === "isometric" ? "📐 Isometric" : (angleMode === "topdown" ? "🗺️ Blueprint" : "🛋️ Perspective");
 
-  // Large Window on right
-  ctx.strokeStyle = "#4da3ff";
-  ctx.lineWidth = 8;
+    hud.innerHTML = `
+      <span class="canvas-hud-space">${roomName} • ${sqft} sq ft</span>
+      <div class="canvas-hud-chips">
+        <span class="canvas-hud-chip" title="Wall Paint"><span class="canvas-hud-dot" style="background:${selections.wallColor}"></span> Wall</span>
+        <span class="canvas-hud-chip" title="Flooring"><span class="canvas-hud-dot" style="background:${selections.floorColor}"></span> Floor</span>
+        <span class="canvas-hud-chip" title="Fabric / Upholstery"><span class="canvas-hud-dot" style="background:${selections.sofaColor}"></span> Fabric</span>
+        <span class="canvas-hud-chip" title="Millwork Wood"><span class="canvas-hud-dot" style="background:${selections.accentWoodColor}"></span> Wood</span>
+        <span class="canvas-hud-chip" title="Stone / Metal Accent"><span class="canvas-hud-dot" style="background:${selections.accentColor}"></span> Accent</span>
+      </div>
+      <span class="badge badge-subtle" style="font-size:0.68rem; padding: 2px 7px;">${angleLabel} • ${lightIcon}</span>
+    `;
+  }
+
+  ctx.restore();
+}
+
+// 1. Perspective 2.5D Studio View
+function drawPerspectiveView(ctx, w, h, roomType, selections) {
+  const vp = { x: w * 0.45, y: h * 0.32 };
+  const bwX = w * 0.18, bwY = h * 0.08, bwW = w * 0.76, bwH = h * 0.44;
+  const floorY = bwY + bwH; // approx 0.52 * h
+
+  // 1. Ceiling
+  const ceilGrad = ctx.createLinearGradient(0, 0, 0, bwY);
+  ceilGrad.addColorStop(0, "#11141e");
+  ceilGrad.addColorStop(1, "#1a1f2e");
+  ctx.fillStyle = ceilGrad;
   ctx.beginPath();
-  ctx.moveTo(rx + rw, ry + rh * 0.2);
-  ctx.lineTo(rx + rw, ry + rh * 0.8);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(w, 0);
+  ctx.lineTo(bwX + bwW, bwY);
+  ctx.lineTo(bwX, bwY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Ceiling Cove Light Strip
+  ctx.strokeStyle = selections.lightingMode === "night" ? "rgba(255, 200, 120, 0.65)" : "rgba(255, 235, 205, 0.45)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(bwX, bwY);
+  ctx.lineTo(bwX + bwW, bwY);
   ctx.stroke();
 
-  // 3. Room-Specific Furniture Layout
-  if (roomType === "bedroom") {
-    // Large Area Rug
-    ctx.fillStyle = "rgba(235, 230, 222, 0.8)";
-    const rugX = rx + rw * 0.16, rugY = ry + rh * 0.14, rugW = rw * 0.68, rugH = rh * 0.72;
-    ctx.fillRect(rugX, rugY, rugW, rugH);
+  // 2. Left Wall in perspective
+  const wallCol = selections.wallColor || "#F0ECE1";
+  const leftWallGrad = ctx.createLinearGradient(0, 0, bwX, floorY);
+  leftWallGrad.addColorStop(0, adjustBrightness(wallCol, -25));
+  leftWallGrad.addColorStop(0.7, wallCol);
+  leftWallGrad.addColorStop(1, adjustBrightness(wallCol, -15));
 
-    // Fluted Headboard Wall
-    ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
-    ctx.fillRect(rx + rw * 0.22, ry + 12, rw * 0.56, 28);
+  ctx.fillStyle = leftWallGrad;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(bwX, bwY);
+  ctx.lineTo(bwX, floorY);
+  ctx.lineTo(0, h);
+  ctx.closePath();
+  ctx.fill();
 
-    // Bed Frame
-    ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
-    const bedX = rx + rw * 0.28, bedY = ry + rh * 0.16, bedW = rw * 0.44, bedH = rh * 0.56;
-    ctx.fillRect(bedX, bedY, bedW, bedH);
+  // Architectural Floor-to-Ceiling Window on Left
+  const winTopLeft = { x: w * 0.02, y: h * 0.06 };
+  const winTopRight = { x: w * 0.14, y: h * 0.12 };
+  const winBotLeft = { x: w * 0.02, y: h * 0.88 };
+  const winBotRight = { x: w * 0.14, y: h * 0.58 };
 
-    // Duvet / Bedding (Takes chosen bed fabric color!)
-    ctx.fillStyle = selections.sofaColor || "#D7CFC7";
-    ctx.fillRect(bedX + 10, bedY + 38, bedW - 20, bedH - 48);
-    ctx.strokeStyle = "#2b2b2b";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(bedX + 10, bedY + 38, bedW - 20, bedH - 48);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(winTopLeft.x, winTopLeft.y);
+  ctx.lineTo(winTopRight.x, winTopRight.y);
+  ctx.lineTo(winBotRight.x, winBotRight.y);
+  ctx.lineTo(winBotLeft.x, winBotLeft.y);
+  ctx.closePath();
+  ctx.clip();
 
-    // Bed Pillows
-    ctx.fillStyle = "#ffffff";
-    const pW = (bedW - 50) / 2;
-    ctx.fillRect(bedX + 16, bedY + 10, pW, 24);
-    ctx.fillRect(bedX + 16 + pW + 18, bedY + 10, pW, 24);
-
-    // Floating Nightstands
-    ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
-    ctx.fillRect(bedX - 44, bedY + 12, 36, 42);
-    ctx.fillRect(bedX + bedW + 8, bedY + 12, 36, 42);
-  } else if (roomType === "kitchen") {
-    // Rear Cabinetry Millwork Wall
-    ctx.fillStyle = selections.accentWoodColor || "#22252A";
-    ctx.fillRect(rx + 12, ry + 12, rw - 24, 55);
-    ctx.strokeStyle = "#444444";
-    ctx.strokeRect(rx + 12, ry + 12, rw - 24, 55);
-
-    // Waterfall Island (Takes Quartz Countertop / Accent color!)
-    const islX = rx + rw * 0.22, islY = ry + rh * 0.4, islW = rw * 0.56, islH = rh * 0.34;
-    ctx.fillStyle = "#fcfaf6";
-    ctx.fillRect(islX, islY, islW, islH);
-    ctx.strokeStyle = selections.accentColor || "#CBB17C";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(islX, islY, islW, islH);
-
-    // Island Undermount Sink
-    ctx.fillStyle = "#22252A";
-    ctx.fillRect(islX + islW * 0.18, islY + 14, islW * 0.22, islH * 0.45);
-
-    // 3 Bar Stools (Take upholstery color!)
-    ctx.fillStyle = selections.sofaColor || "#D7CFC7";
-    const stoolR = Math.min(rw, rh) * 0.052;
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath();
-      ctx.arc(islX + (i + 1) * (islW / 4), islY + islH + 28, stoolR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#1a1a1a";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
+  // Outside Sky
+  const skyGrad = ctx.createLinearGradient(0, winTopLeft.y, 0, winBotLeft.y);
+  if (selections.lightingMode === "night") {
+    skyGrad.addColorStop(0, "#080c18");
+    skyGrad.addColorStop(1, "#141d33");
+  } else if (selections.lightingMode === "golden") {
+    skyGrad.addColorStop(0, "#ff8450");
+    skyGrad.addColorStop(0.6, "#ffbe76");
+    skyGrad.addColorStop(1, "#dff9fb");
   } else {
-    // Living Room: Rug, Sectional Sofa, Coffee Table
-    ctx.fillStyle = "rgba(235, 230, 222, 0.75)";
-    const rugX = rx + rw * 0.18, rugY = ry + rh * 0.18, rugW = rw * 0.64, rugH = rh * 0.64;
-    ctx.fillRect(rugX, rugY, rugW, rugH);
+    skyGrad.addColorStop(0, "#74b9ff");
+    skyGrad.addColorStop(0.8, "#c7ecee");
+    skyGrad.addColorStop(1, "#f5f6fa");
+  }
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, w * 0.3, h);
 
-    // Sectional Sofa (Takes chosen upholstery color!)
-    ctx.fillStyle = selections.sofaColor || "#D7CFC7";
-    const sofaX = rugX + rugW * 0.1, sofaY = rugY + rugH * 0.12, sofaW = rugW * 0.8, sofaH = rugH * 0.38;
-    ctx.fillRect(sofaX, sofaY, sofaW, sofaH);
-    ctx.strokeStyle = "#222222";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(sofaX, sofaY, sofaW, sofaH);
+  // Landscape silhouette in window
+  ctx.fillStyle = selections.lightingMode === "night" ? "#04070e" : "#2d3436";
+  ctx.beginPath();
+  ctx.arc(winBotLeft.x + 30, winBotRight.y + 20, 48, Math.PI, 0);
+  ctx.arc(winBotRight.x - 10, winBotRight.y + 30, 40, Math.PI, 0);
+  ctx.fill();
 
-    // Cushions
-    ctx.fillStyle = "rgba(0,0,0,0.06)";
-    const cW = sofaW / 3;
-    for (let i = 0; i < 3; i++) {
-      ctx.strokeRect(sofaX + i * cW, sofaY, cW, sofaH);
-    }
+  ctx.restore();
 
-    // Coffee Table (Takes accent color!)
-    ctx.fillStyle = "#faf6f0";
+  // Window frame & mullions
+  ctx.strokeStyle = "#1b1f2b";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(winTopLeft.x, winTopLeft.y);
+  ctx.lineTo(winTopRight.x, winTopRight.y);
+  ctx.lineTo(winBotRight.x, winBotRight.y);
+  ctx.lineTo(winBotLeft.x, winBotLeft.y);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Window crossbar
+  const midTop = { x: (winTopLeft.x + winTopRight.x) / 2, y: (winTopLeft.y + winTopRight.y) / 2 };
+  const midBot = { x: (winBotLeft.x + winBotRight.x) / 2, y: (winBotLeft.y + winBotRight.y) / 2 };
+  ctx.beginPath();
+  ctx.moveTo(midTop.x, midTop.y);
+  ctx.lineTo(midBot.x, midBot.y);
+  ctx.stroke();
+
+  // Sheer Curtains
+  ctx.fillStyle = "rgba(255, 255, 255, 0.38)";
+  ctx.fillRect(winTopLeft.x - 3, winTopLeft.y, 12, winBotLeft.y - winTopLeft.y + 10);
+  ctx.fillRect(winTopRight.x - 8, winTopRight.y, 14, winBotRight.y - winTopRight.y + 10);
+
+  // Light Spill across floor
+  ctx.fillStyle = selections.lightingMode === "golden" 
+    ? "rgba(255, 175, 75, 0.12)" 
+    : (selections.lightingMode === "night" ? "rgba(90, 140, 255, 0.04)" : "rgba(255, 255, 255, 0.09)");
+  ctx.beginPath();
+  ctx.moveTo(winBotRight.x, winBotRight.y);
+  ctx.lineTo(winBotLeft.x, winBotLeft.y);
+  ctx.lineTo(w * 0.40, h);
+  ctx.lineTo(w * 0.52, h);
+  ctx.closePath();
+  ctx.fill();
+
+  // 3. Back Wall
+  const backWallGrad = ctx.createLinearGradient(0, bwY, 0, floorY);
+  backWallGrad.addColorStop(0, wallCol);
+  backWallGrad.addColorStop(1, adjustBrightness(wallCol, -8));
+  ctx.fillStyle = backWallGrad;
+  ctx.fillRect(bwX, bwY, bwW, bwH);
+
+  // Baseboard along back wall
+  ctx.fillStyle = selections.accentWoodColor || "#8E5A3C";
+  ctx.fillRect(bwX, floorY - 6, bwW, 6);
+
+  // 4. Floor Plane
+  const floorCol = selections.floorColor || "#CBB69D";
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  ctx.lineTo(bwX, floorY);
+  ctx.lineTo(bwX + bwW, floorY);
+  ctx.lineTo(w, h);
+  ctx.closePath();
+  ctx.clip();
+
+  // Floor Base Fill
+  const floorGrad = ctx.createLinearGradient(0, floorY, 0, h);
+  floorGrad.addColorStop(0, adjustBrightness(floorCol, -12));
+  floorGrad.addColorStop(1, floorCol);
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0, floorY, w, h - floorY);
+
+  // Perspective Wood Planks
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.10)";
+  ctx.lineWidth = 1;
+  const plankSpacing = 30;
+  for (let px = -w * 0.4; px <= w * 1.4; px += plankSpacing) {
     ctx.beginPath();
-    ctx.arc(rugX + rugW * 0.5, rugY + rugH * 0.72, Math.min(rw, rh) * 0.09, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = selections.accentColor || "#CBB17C";
-    ctx.lineWidth = 3;
+    ctx.moveTo(vp.x, vp.y);
+    ctx.lineTo(px, h);
     ctx.stroke();
   }
 
-  // 4. Lighting tint overlay
+  // Staggered cross seams
+  for (let k = 1; k <= 7; k++) {
+    const py = floorY + (h - floorY) * Math.pow(k / 7.2, 1.7);
+    ctx.beginPath();
+    ctx.moveTo(0, py);
+    ctx.lineTo(w, py);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Baseboard on left wall bottom
+  ctx.strokeStyle = selections.accentWoodColor || "#8E5A3C";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  ctx.lineTo(bwX, floorY);
+  ctx.stroke();
+
+  // --- ROOM-SPECIFIC FURNITURE & ARCHITECTURAL ELEMENTS ---
+  const woodCol = selections.accentWoodColor || "#8E5A3C";
+  const fabricCol = selections.sofaColor || "#D7CFC7";
+  const accentCol = selections.accentColor || "#CBB17C";
+
+  if (roomType === "bedroom") {
+    // 1. Full-Height Fluted Headboard Wall
+    const hbX = bwX + bwW * 0.16;
+    const hbW = bwW * 0.68;
+    const hbY = bwY + 6;
+    const hbH = floorY - hbY;
+
+    // LED Backlight Halo
+    ctx.fillStyle = selections.lightingMode === "night" ? "rgba(255, 190, 110, 0.7)" : "rgba(255, 225, 150, 0.45)";
+    ctx.fillRect(hbX - 8, hbY - 6, hbW + 16, 12);
+
+    // Fluted Wood Slats
+    const slatW = 8;
+    for (let sx = hbX; sx < hbX + hbW; sx += slatW) {
+      ctx.fillStyle = woodCol;
+      ctx.fillRect(sx, hbY, slatW - 2, hbH);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+      ctx.fillRect(sx + slatW - 2, hbY, 2, hbH);
+    }
+
+    // 2. King Platform Bed Suite
+    const bedW = bwW * 0.50;
+    const bedX = bwX + (bwW - bedW) / 2;
+    const bedTopY = floorY - 65;
+    const bedBotY = h - 115;
+    const bedH = bedBotY - bedTopY;
+
+    // Floating Nightstands (Left & Right)
+    const nsLX = bedX - 48, nsLY = floorY - 60, nsW = 38, nsH = 44;
+    const nsRX = bedX + bedW + 10, nsRY = floorY - 60, nsW2 = 38, nsH2 = 44;
+
+    ctx.fillStyle = adjustBrightness(woodCol, -12);
+    ctx.fillRect(nsLX, nsLY, nsW, nsH);
+    ctx.fillRect(nsRX, nsRY, nsW2, nsH2);
+
+    // Nightstand Drop Shadows
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.fillRect(nsLX, floorY - 2, nsW, 4);
+    ctx.fillRect(nsRX, floorY - 2, nsW2, 4);
+
+    // Glowing Bedside Glass Orbs
+    ctx.fillStyle = "rgba(255, 245, 220, 0.95)";
+    ctx.beginPath();
+    ctx.arc(nsLX + 19, nsLY - 16, 11, 0, Math.PI * 2);
+    ctx.arc(nsRX + 19, nsRY - 16, 11, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Halo glow
+    ctx.fillStyle = "rgba(255, 215, 130, 0.35)";
+    ctx.beginPath();
+    ctx.arc(nsLX + 19, nsLY - 16, 24, 0, Math.PI * 2);
+    ctx.arc(nsRX + 19, nsRY - 16, 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Large Bedroom Area Rug under bed
+    const rugX1 = bedX - 35, rugY1 = floorY - 6, rugW1 = bedW + 70;
+    const rugX2 = bedX - 55, rugY2 = h - 25, rugW2 = bedW + 110;
+    ctx.fillStyle = "rgba(228, 222, 212, 0.92)";
+    ctx.beginPath();
+    ctx.moveTo(rugX1, rugY1);
+    ctx.lineTo(rugX1 + rugW1, rugY1);
+    ctx.lineTo(rugX2 + rugW2, rugY2);
+    ctx.lineTo(rugX2, rugY2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.08)";
+    ctx.stroke();
+
+    // Bed Platform Base
+    ctx.fillStyle = adjustBrightness(woodCol, -15);
+    ctx.fillRect(bedX - 4, bedBotY - 14, bedW + 8, 16);
+
+    // Mattress Edge
+    ctx.fillStyle = "#faf8f5";
+    ctx.fillRect(bedX, bedTopY + 18, bedW, 22);
+
+    // Propped Sleeping Pillows
+    const pW = (bedW - 36) / 2;
+    // White Euro Shams behind
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(bedX + 8, bedTopY - 16, pW, 32);
+    ctx.fillRect(bedX + 8 + pW + 20, bedTopY - 16, pW, 32);
+
+    // Front Accent Pillows (Fabric Color)
+    ctx.fillStyle = fabricCol;
+    ctx.fillRect(bedX + 16, bedTopY - 2, pW - 16, 26);
+    ctx.fillRect(bedX + 16 + pW + 20, bedTopY - 2, pW - 16, 26);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.15)";
+    ctx.strokeRect(bedX + 16, bedTopY - 2, pW - 16, 26);
+    ctx.strokeRect(bedX + 16 + pW + 20, bedTopY - 2, pW - 16, 26);
+
+    // Luxury Duvet / Bedspread (Takes chosen fabric color!)
+    const duvetGrad = ctx.createLinearGradient(0, bedTopY + 28, 0, bedBotY - 14);
+    duvetGrad.addColorStop(0, fabricCol);
+    duvetGrad.addColorStop(1, adjustBrightness(fabricCol, -15));
+
+    ctx.fillStyle = duvetGrad;
+    ctx.beginPath();
+    ctx.roundRect(bedX - 2, bedTopY + 28, bedW + 4, bedH - 42, [8, 8, 4, 4]);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.18)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Crisp white sheet turnover at top of duvet
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(bedX - 2, bedTopY + 26, bedW + 4, 9);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.strokeRect(bedX - 2, bedTopY + 26, bedW + 4, 9);
+
+    // Folded Bed Throw Blanket at Foot (Accent Wood color)
+    ctx.fillStyle = adjustBrightness(woodCol, 10);
+    ctx.fillRect(bedX - 3, bedBotY - 44, bedW + 6, 24);
+    ctx.strokeStyle = "rgba(0,0,0,0.15)";
+    ctx.strokeRect(bedX - 3, bedBotY - 44, bedW + 6, 24);
+
+    // End-of-Bed Bench
+    const benchW = bedW * 0.72;
+    const benchX = bedX + (bedW - benchW) / 2;
+    const benchY = bedBotY + 6;
+    ctx.fillStyle = fabricCol;
+    ctx.fillRect(benchX, benchY, benchW, 14);
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(benchX, benchY, benchW, 14);
+
+    // Bench brass legs
+    ctx.fillStyle = accentCol;
+    ctx.fillRect(benchX + 6, benchY + 14, 4, 10);
+    ctx.fillRect(benchX + benchW - 10, benchY + 14, 4, 10);
+
+  } else if (roomType === "kitchen") {
+    // 1. Full-Height Cabinet Millwork Wall
+    const cabCol = woodCol;
+    const wallH = floorY - bwY;
+
+    ctx.fillStyle = cabCol;
+    ctx.fillRect(bwX, bwY, bwW, wallH);
+
+    // Cabinet Panel Dividers
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = 1.5;
+    const colW = bwW / 8;
+    for (let c = 1; c < 8; c++) {
+      ctx.beginPath();
+      ctx.moveTo(bwX + c * colW, bwY);
+      ctx.lineTo(bwX + c * colW, floorY);
+      ctx.stroke();
+    }
+    // Horizontal shelf reveal
+    ctx.beginPath();
+    ctx.moveTo(bwX, bwY + wallH * 0.42);
+    ctx.lineTo(bwX + bwW, bwY + wallH * 0.42);
+    ctx.stroke();
+
+    // Recessed Prep Backsplash Niche
+    const nicheX = bwX + bwW * 0.20;
+    const nicheW = bwW * 0.58;
+    const nicheY = bwY + wallH * 0.25;
+    const nicheH = wallH * 0.42;
+
+    ctx.fillStyle = "#f6f4ee";
+    ctx.fillRect(nicheX, nicheY, nicheW, nicheH);
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(nicheX, nicheY, nicheW, nicheH);
+
+    // Under-Cabinet LED Strip Task Glow
+    ctx.fillStyle = "rgba(255, 240, 180, 0.65)";
+    ctx.fillRect(nicheX, nicheY, nicheW, 6);
+
+    // Double Black Glass Wall Ovens on Right
+    const ovenX = bwX + bwW * 0.82;
+    const ovenW = bwW * 0.14;
+    const ovenY = bwY + wallH * 0.22;
+    ctx.fillStyle = "#111215";
+    ctx.fillRect(ovenX, ovenY, ovenW, wallH * 0.50);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+    ctx.strokeRect(ovenX, ovenY, ovenW, wallH * 0.50);
+    // Oven displays
+    ctx.fillStyle = "#00e5ff";
+    ctx.fillRect(ovenX + 10, ovenY + 12, 18, 4);
+
+    // 2. Central Waterfall Kitchen Island
+    const islW = bwW * 0.68;
+    const islX = bwX + (bwW - islW) / 2;
+    const islTopY = floorY - 12;
+    const islH = 105;
+    const islBotY = islTopY + islH;
+
+    // Island Base Cabinetry Face
+    ctx.fillStyle = cabCol;
+    ctx.fillRect(islX + 14, islTopY + 14, islW - 28, islH - 14);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.strokeRect(islX + 14, islTopY + 14, islW - 28, islH - 14);
+
+    // Waterfall Quartz Countertop (Top Slab + Left/Right Waterfall sides)
+    ctx.fillStyle = "#fdfbfa";
+    ctx.fillRect(islX, islTopY, islW, 14);
+
+    // Left Waterfall End
+    ctx.fillStyle = "#eae6df";
+    ctx.fillRect(islX, islTopY, 14, islH);
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(islX, islTopY, 14, islH);
+
+    // Right Waterfall End
+    ctx.fillStyle = "#dcd7cf";
+    ctx.fillRect(islX + islW - 14, islTopY, 14, islH);
+    ctx.strokeRect(islX + islW - 14, islTopY, 14, islH);
+
+    // Top slab trim outline
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(islX, islTopY, islW, 14);
+
+    // Undermount Sink & Tall Brass Gooseneck Faucet
+    const sinkX = islX + islW * 0.25;
+    ctx.fillStyle = "#1e2024";
+    ctx.fillRect(sinkX, islTopY + 3, 44, 8);
+
+    // Brass Faucet
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(sinkX + 22, islTopY + 3);
+    ctx.lineTo(sinkX + 22, islTopY - 24);
+    ctx.arc(sinkX + 15, islTopY - 24, 7, 0, Math.PI, true);
+    ctx.stroke();
+
+    // 3. Trio of Modern Bar Stools (Taking Upholstery / Leather Color)
+    const stoolCol = fabricCol;
+    const stoolSpacing = islW / 4;
+    for (let s = 1; s <= 3; s++) {
+      const stX = islX + s * stoolSpacing;
+      const stY = islBotY + 8;
+
+      // Drop shadow
+      ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+      ctx.beginPath();
+      ctx.ellipse(stX, stY + 36, 18, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Slender metal legs
+      ctx.strokeStyle = "#1a1a1a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(stX - 12, stY + 6);
+      ctx.lineTo(stX - 14, stY + 36);
+      ctx.moveTo(stX + 12, stY + 6);
+      ctx.lineTo(stX + 14, stY + 36);
+      // Footrest rail
+      ctx.moveTo(stX - 13, stY + 24);
+      ctx.lineTo(stX + 13, stY + 24);
+      ctx.stroke();
+
+      // Padded Seat Cushion
+      ctx.fillStyle = stoolCol;
+      ctx.beginPath();
+      ctx.roundRect(stX - 15, stY - 4, 30, 10, [4, 4, 2, 2]);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
+      ctx.stroke();
+
+      // Low Backrest
+      ctx.fillStyle = stoolCol;
+      ctx.fillRect(stX - 12, stY - 18, 24, 10);
+      ctx.strokeRect(stX - 12, stY - 18, 24, 10);
+    }
+
+    // Overhead Linear Brass LED Chandelier
+    ctx.fillStyle = accentCol;
+    ctx.fillRect(islX + 30, bwY + 26, islW - 60, 5);
+    ctx.fillStyle = "rgba(255, 245, 215, 0.9)";
+    ctx.fillRect(islX + 35, bwY + 31, islW - 70, 3);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(islX + 60, 0);
+    ctx.lineTo(islX + 60, bwY + 26);
+    ctx.moveTo(islX + islW - 60, 0);
+    ctx.lineTo(islX + islW - 60, bwY + 26);
+    ctx.stroke();
+
+  } else {
+    // Living Room (Default)
+    // 1. Acoustic Fluted Wood Slat Wall on Right Side
+    const slatStartX = bwX + bwW * 0.54;
+    const slatEndX = bwX + bwW;
+    for (let sx = slatStartX; sx < slatEndX; sx += 9) {
+      ctx.fillStyle = woodCol;
+      ctx.fillRect(sx, bwY, 7, floorY - bwY);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
+      ctx.fillRect(sx + 7, bwY, 2, floorY - bwY);
+    }
+
+    // 2. Large Gallery Abstract Art on Left
+    const artX = bwX + bwW * 0.08;
+    const artY = bwY + 22;
+    const artW = bwW * 0.38;
+    const artH = (floorY - bwY) * 0.65;
+
+    ctx.fillStyle = "#faf7f2";
+    ctx.fillRect(artX, artY, artW, artH);
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(artX, artY, artW, artH);
+
+    // Abstract strokes
+    ctx.fillStyle = "rgba(142, 90, 60, 0.4)";
+    ctx.beginPath();
+    ctx.arc(artX + artW * 0.45, artY + artH * 0.45, 34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = selections.wallColor || "#F0ECE1";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(artX + 16, artY + artH - 20);
+    ctx.lineTo(artX + artW - 16, artY + 24);
+    ctx.stroke();
+
+    // 3. Hand-Knotted Textured Area Rug
+    const rugX1 = w * 0.18, rugY1 = floorY - 5, rugW1 = w * 0.66;
+    const rugX2 = w * 0.08, rugY2 = h - 20, rugW2 = w * 0.84;
+    ctx.fillStyle = "rgba(235, 230, 222, 0.92)";
+    ctx.beginPath();
+    ctx.moveTo(rugX1, rugY1);
+    ctx.lineTo(rugX1 + rugW1, rugY1);
+    ctx.lineTo(rugX2 + rugW2, rugY2);
+    ctx.lineTo(rugX2, rugY2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.08)";
+    ctx.stroke();
+
+    // 4. Sectional Lounge Sofa
+    const sofaCol = fabricCol;
+    const sofaX = w * 0.20;
+    const sofaY = floorY - 10;
+    const sofaW = w * 0.54;
+    const sofaH = 105;
+
+    // Sofa Wood Plinth Base
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(sofaX, sofaY + sofaH - 12, sofaW, 14);
+
+    // Main Seating Blocks
+    const seatW = sofaW / 3;
+    for (let i = 0; i < 3; i++) {
+      const grad = ctx.createLinearGradient(0, sofaY, 0, sofaY + sofaH);
+      grad.addColorStop(0, sofaCol);
+      grad.addColorStop(1, adjustBrightness(sofaCol, -14));
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(sofaX + i * seatW + 2, sofaY, seatW - 4, sofaH - 14, [6, 6, 2, 2]);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.18)";
+      ctx.stroke();
+    }
+
+    // Plush Backrest
+    ctx.fillStyle = sofaCol;
+    ctx.fillRect(sofaX, sofaY - 24, sofaW, 24);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.2)";
+    ctx.strokeRect(sofaX, sofaY - 24, sofaW, 24);
+
+    // Right Chaise Extension
+    const chaiseX = sofaX + sofaW - 20;
+    const chaiseW = w * 0.16;
+    ctx.fillStyle = adjustBrightness(sofaCol, -5);
+    ctx.fillRect(chaiseX, sofaY + 10, chaiseW, sofaH + 16);
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.18)";
+    ctx.strokeRect(chaiseX, sofaY + 10, chaiseW, sofaH + 16);
+
+    // Accent Pillows
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(sofaX + 16, sofaY - 12, 26, 20);
+    ctx.fillStyle = accentCol;
+    ctx.fillRect(chaiseX + 8, sofaY + 16, 24, 20);
+
+    // 5. Sculptural Coffee Table (Calacatta Top & Brass Base)
+    const tableX = w * 0.44;
+    const tableY = sofaY + sofaH + 8;
+    const tableR = Math.min(w, h) * 0.08;
+
+    // Table shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.beginPath();
+    ctx.ellipse(tableX, tableY + 5, tableR, tableR * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Table Top Marble Slab
+    ctx.fillStyle = "#faf7f2";
+    ctx.beginPath();
+    ctx.ellipse(tableX, tableY, tableR, tableR * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = accentCol;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Hardcover Book on Table
+    ctx.fillStyle = "#1e2229";
+    ctx.fillRect(tableX - 14, tableY - 6, 22, 10);
+    ctx.fillStyle = accentCol;
+    ctx.fillRect(tableX - 12, tableY - 4, 7, 7);
+
+    // 6. Arc Floor Lamp
+    ctx.strokeStyle = "#1e2025";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bwX + 25, floorY + 30);
+    ctx.bezierCurveTo(bwX + 10, bwY - 10, w * 0.32, bwY - 20, w * 0.35, sofaY - 30);
+    ctx.stroke();
+
+    // Glowing Lamp Diffuser
+    ctx.fillStyle = "rgba(255, 235, 180, 0.95)";
+    ctx.beginPath();
+    ctx.arc(w * 0.35, sofaY - 30, 11, 0, Math.PI, true);
+    ctx.fill();
+  }
+
+  // Atmospheric Lighting Wash Tint
   if (selections.lightingMode === "golden") {
-    ctx.fillStyle = "rgba(255, 170, 70, 0.12)";
+    ctx.fillStyle = "rgba(255, 165, 60, 0.12)";
     ctx.fillRect(0, 0, w, h);
   } else if (selections.lightingMode === "night") {
     ctx.fillStyle = "rgba(10, 18, 40, 0.35)";
     ctx.fillRect(0, 0, w, h);
   }
-
-  // Active Palette HUD in corner
-  ctx.fillStyle = "rgba(18, 24, 38, 0.92)";
-  ctx.fillRect(rx + 15, ry + 15, 270, 68);
-  ctx.strokeStyle = "#C29D59";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(rx + 15, ry + 15, 270, 68);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
-  const spaceLabel = roomType === "bedroom" ? "2D Master Bedroom Customizer" : roomType === "kitchen" ? "2D Modular Kitchen Customizer" : "2D Living Room Customizer";
-  ctx.fillText(spaceLabel, rx + 25, ry + 36);
-
-  ctx.fillStyle = "#C29D59";
-  ctx.font = "11px 'Plus Jakarta Sans', sans-serif";
-  ctx.fillText(`Wall: ${selections.wallColor}  •  Floor: ${selections.floorColor}`, rx + 25, ry + 54);
-  ctx.fillText(`Fabric: ${selections.sofaColor}  •  Wood: ${selections.accentWoodColor}`, rx + 25, ry + 70);
 }
 
-// --- VIEWPORT MODES ---
+function drawIsometricView(ctx, w, h, roomType, selections) {
+  const cx = w * 0.5;
+  const cy = h * 0.52;
+  const isoW = Math.min(w * 0.38, 280);
+  const isoH = isoW * 0.58;
+
+  // Background Grid
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x < w; x += 30) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+
+  // Isometric Diamond Floor
+  const floorCol = selections.floorColor || "#CBB69D";
+  ctx.fillStyle = floorCol;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - isoH);
+  ctx.lineTo(cx + isoW, cy);
+  ctx.lineTo(cx, cy + isoH);
+  ctx.lineTo(cx - isoW, cy);
+  ctx.closePath();
+  ctx.fill();
+
+  // Floor grid planks
+  ctx.strokeStyle = "rgba(0,0,0,0.14)";
+  for (let d = -3; d <= 3; d++) {
+    const shift = d * (isoW / 4);
+    ctx.beginPath();
+    ctx.moveTo(cx + shift, cy - isoH + Math.abs(shift)*0.58);
+    ctx.lineTo(cx + shift, cy + isoH - Math.abs(shift)*0.58);
+    ctx.stroke();
+  }
+
+  // Left Wall Cutaway
+  const wallCol = selections.wallColor || "#F0ECE1";
+  const wallH = 140;
+  ctx.fillStyle = adjustBrightness(wallCol, -12);
+  ctx.beginPath();
+  ctx.moveTo(cx - isoW, cy);
+  ctx.lineTo(cx, cy - isoH);
+  ctx.lineTo(cx, cy - isoH - wallH);
+  ctx.lineTo(cx - isoW, cy - wallH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+  ctx.stroke();
+
+  // Right Wall Cutaway
+  ctx.fillStyle = wallCol;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - isoH);
+  ctx.lineTo(cx + isoW, cy);
+  ctx.lineTo(cx + isoW, cy - wallH);
+  ctx.lineTo(cx, cy - isoH - wallH);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Room Isometric Furniture Block
+  const sofaCol = selections.sofaColor || "#D7CFC7";
+  const woodCol = selections.accentWoodColor || "#8E5A3C";
+
+  if (roomType === "bedroom") {
+    // 3D Isometric King Bed
+    const bx = cx - 40, by = cy - 20;
+    // Bed Base
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(bx, by, 90, 55);
+    // Bed Duvet
+    ctx.fillStyle = sofaCol;
+    ctx.fillRect(bx + 6, by + 12, 78, 40);
+    ctx.strokeStyle = "rgba(0,0,0,0.2)";
+    ctx.strokeRect(bx + 6, by + 12, 78, 40);
+    // Pillows
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(bx + 10, by + 2, 32, 12);
+    ctx.fillRect(bx + 48, by + 2, 32, 12);
+  } else if (roomType === "kitchen") {
+    // 3D Isometric Island
+    const ix = cx - 55, iy = cy - 10;
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(ix, iy, 110, 48);
+    // Waterfall Quartz Slab
+    ctx.fillStyle = "#faf8f4";
+    ctx.fillRect(ix - 4, iy - 6, 118, 10);
+    ctx.strokeStyle = selections.accentColor || "#CBB17C";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ix - 4, iy - 6, 118, 10);
+  } else {
+    // 3D Isometric Sofa
+    const sx = cx - 60, sy = cy - 20;
+    ctx.fillStyle = sofaCol;
+    ctx.fillRect(sx, sy, 120, 45);
+    ctx.strokeStyle = "rgba(0,0,0,0.2)";
+    ctx.strokeRect(sx, sy, 120, 45);
+    // Coffee Table
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(cx, cy + 30, 22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = selections.accentColor || "#CBB17C";
+    ctx.stroke();
+  }
+
+  // Label
+  ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.font = "bold 13px 'Plus Jakarta Sans', sans-serif";
+  ctx.fillText("Axonometric 3D Cutaway Studio", 24, 34);
+}
+
+// 3. Architectural Blueprint Floorplan View
+function drawBlueprintView(ctx, w, h, roomType, selections) {
+  // Blueprint Grid Background
+  ctx.fillStyle = "#0c1220";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = "rgba(0, 180, 255, 0.08)";
+  ctx.lineWidth = 1;
+  const grid = 24;
+  for (let x = 0; x < w; x += grid) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let y = 0; y < h; y += grid) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  const rx = w * 0.15, ry = h * 0.14;
+  const rw = w * 0.70, rh = h * 0.72;
+
+  // Floor Fill
+  ctx.fillStyle = selections.floorColor || "#CBB69D";
+  ctx.fillRect(rx, ry, rw, rh);
+
+  // Floor Hatching
+  ctx.strokeStyle = "rgba(0,0,0,0.12)";
+  for (let x = rx; x < rx + rw; x += 22) {
+    ctx.beginPath(); ctx.moveTo(x, ry); ctx.lineTo(x, ry + rh); ctx.stroke();
+  }
+
+  // Outer Walls with Architectural Thickness
+  ctx.strokeStyle = selections.wallColor || "#F0ECE1";
+  ctx.lineWidth = 14;
+  ctx.strokeRect(rx, ry, rw, rh);
+
+  // Door Swing Arc in bottom-left
+  ctx.strokeStyle = "#4da3ff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(rx, ry + rh, 50, -Math.PI / 2, 0, false);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(rx, ry + rh);
+  ctx.lineTo(rx + 50, ry + rh);
+  ctx.stroke();
+
+  // Furniture Layout
+  const sofaCol = selections.sofaColor || "#D7CFC7";
+  const woodCol = selections.accentWoodColor || "#8E5A3C";
+
+  if (roomType === "bedroom") {
+    // Bed Headboard
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(rx + rw * 0.28, ry + 8, rw * 0.44, 20);
+
+    // Bed
+    ctx.fillStyle = sofaCol;
+    ctx.fillRect(rx + rw * 0.30, ry + 28, rw * 0.40, rh * 0.54);
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(rx + rw * 0.30, ry + 28, rw * 0.40, rh * 0.54);
+
+    // Bed Text
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText("KING BED 76\" x 80\"", rx + rw * 0.34, ry + rh * 0.32);
+
+    // Nightstands
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(rx + rw * 0.20, ry + 12, 34, 38);
+    ctx.fillRect(rx + rw * 0.72, ry + 12, 34, 38);
+
+  } else if (roomType === "kitchen") {
+    // Rear Cabinets
+    ctx.fillStyle = woodCol;
+    ctx.fillRect(rx + 8, ry + 8, rw - 16, 42);
+
+    // Island
+    ctx.fillStyle = "#faf8f4";
+    ctx.fillRect(rx + rw * 0.22, ry + rh * 0.42, rw * 0.56, rh * 0.32);
+    ctx.strokeStyle = selections.accentColor || "#CBB17C";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(rx + rw * 0.22, ry + rh * 0.42, rw * 0.56, rh * 0.32);
+
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText("WATERFALL ISLAND 96\" x 42\"", rx + rw * 0.30, ry + rh * 0.58);
+
+  } else {
+    // Sectional Sofa
+    ctx.fillStyle = sofaCol;
+    ctx.fillRect(rx + rw * 0.18, ry + rh * 0.18, rw * 0.60, rh * 0.34);
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(rx + rw * 0.18, ry + rh * 0.18, rw * 0.60, rh * 0.34);
+
+    // Coffee table
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(rx + rw * 0.48, ry + rh * 0.68, 36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = selections.accentColor || "#CBB17C";
+    ctx.stroke();
+
+    ctx.fillStyle = "#111";
+    ctx.font = "bold 11px monospace";
+    ctx.fillText("MODULAR SECTIONAL", rx + rw * 0.32, ry + rh * 0.36);
+  }
+
+  // Dimension lines
+  ctx.strokeStyle = "#4da3ff";
+  ctx.lineWidth = 1;
+  ctx.fillStyle = "#4da3ff";
+  ctx.font = "11px monospace";
+  ctx.fillText("<--- 18'-6\" --->", rx + rw * 0.38, ry - 14);
+  ctx.fillText("<--- 14'-2\" --->", rx - 65, ry + rh * 0.52);
+}
+
+// --- PHOTO HOTSPOTS OVERLAY ---
+function renderPhotoHotspots(activeConcept, selections) {
+  const container = document.getElementById("photoHotspotsContainer");
+  const tint = document.getElementById("photoTintOverlay");
+  if (!container) return;
+
+  if (tint) {
+    if (selections.lightingMode === "golden") {
+      tint.style.background = selections.accentColor || "#CBB17C";
+      tint.style.opacity = "0.22";
+    } else if (selections.lightingMode === "night") {
+      tint.style.background = "#141e30";
+      tint.style.opacity = "0.36";
+    } else {
+      tint.style.background = selections.wallColor || "#F0ECE1";
+      tint.style.opacity = "0.14";
+    }
+  }
+
+  container.innerHTML = "";
+  const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
+  const roomType = getRoomType(currentRoom);
+
+  const pinConfigs = {
+    living: [
+      { top: "28%", left: "32%", cat: "Wall", color: selections.wallColor, label: "Wall Paint" },
+      { top: "66%", left: "48%", cat: "Upholstery", color: selections.sofaColor, label: "Sofa Fabric" },
+      { top: "86%", left: "70%", cat: "Floor", color: selections.floorColor, label: "Oak Floor" },
+      { top: "74%", left: "28%", cat: "Metal", color: selections.accentColor, label: "Brass Table" },
+      { top: "36%", left: "78%", cat: "Wood", color: selections.accentWoodColor, label: "Fluted Slats" }
+    ],
+    bedroom: [
+      { top: "34%", left: "50%", cat: "Wood", color: selections.accentWoodColor, label: "Fluted Headboard" },
+      { top: "64%", left: "46%", cat: "Fabric", color: selections.sofaColor, label: "Belgian Linen" },
+      { top: "26%", left: "20%", cat: "Wall", color: selections.wallColor, label: "Limewash Wall" },
+      { top: "86%", left: "25%", cat: "Floor", color: selections.floorColor, label: "Oak Planks" },
+      { top: "62%", left: "80%", cat: "Metal", color: selections.accentColor, label: "Brass Sconce" }
+    ],
+    kitchen: [
+      { top: "58%", left: "45%", cat: "Stone", color: selections.accentColor, label: "Waterfall Quartz" },
+      { top: "32%", left: "72%", cat: "Cabinet", color: selections.accentWoodColor, label: "Millwork Wall" },
+      { top: "74%", left: "28%", cat: "Fabric", color: selections.sofaColor, label: "Barstool Leather" },
+      { top: "38%", left: "36%", cat: "Metal", color: selections.accentColor, label: "Brass Pendant" },
+      { top: "88%", left: "68%", cat: "Floor", color: selections.floorColor, label: "Micro-Cement" }
+    ]
+  };
+
+  const pins = pinConfigs[roomType] || pinConfigs.living;
+  pins.forEach(pin => {
+    const el = document.createElement("div");
+    el.className = "photo-hotspot-pin";
+    el.style.top = pin.top;
+    el.style.left = pin.left;
+    el.title = `Click to inspect ${pin.label} specification`;
+
+    el.innerHTML = `
+      <span class="photo-hotspot-dot" style="background: ${pin.color};"></span>
+      <span>${pin.label}</span>
+    `;
+
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const mat = (activeConcept.materials || []).find(m => 
+        m.category.toLowerCase().includes(pin.cat.toLowerCase())
+      );
+      if (mat) {
+        openMaterialModal(mat);
+      }
+    };
+
+    container.appendChild(el);
+  });
+}
+
+// --- VIEWPORT MODES & SUB-TABS ---
 function switchViewportMode(mode) {
   state.viewportMode = mode;
   const is3D = mode === "3d";
@@ -496,7 +1331,8 @@ function switchViewportMode(mode) {
   const threeWrap = document.getElementById("three-canvas-container");
   const photoWrap = document.getElementById("photoRenderWrap");
   const controls3D = document.getElementById("viewport3DControls");
-  const hint3D = document.getElementById("viewport3DHint");
+  const controls2D = document.getElementById("viewport2DControls");
+  const hint = document.getElementById("viewport3DHint");
   const gallery = document.getElementById("anglesGallery");
 
   if (btn3D) btn3D.classList.toggle("active", is3D);
@@ -505,17 +1341,24 @@ function switchViewportMode(mode) {
   if (threeWrap) threeWrap.style.display = is3D ? "block" : "none";
   if (photoWrap) photoWrap.style.display = is3D ? "none" : "block";
   if (controls3D) controls3D.style.display = is3D ? "flex" : "none";
-  if (hint3D) hint3D.style.display = is3D ? "block" : "none";
+  if (controls2D) controls2D.style.display = is3D ? "none" : "flex";
   if (gallery) gallery.style.display = is3D ? "none" : "flex";
 
-  if (is3D && viewer) {
-    setTimeout(() => {
-      viewer.onResize();
-      sync3DViewerMaterials();
-    }, 50);
+  if (hint) {
+    hint.innerText = is3D
+      ? "✨ Rotate & pan with mouse. Click any material swatch below to customize the 3D model in real time!"
+      : "🎨 Live 2D Architectural Studio. Click swatches below to customize walls, flooring, millwork & fabrics!";
+  }
+
+  if (is3D) {
+    if (viewer) {
+      setTimeout(() => {
+        viewer.onResize();
+        sync3DViewerMaterials();
+      }, 50);
+    }
   } else {
-    // Redraw 2D canvas
-    sync3DViewerMaterials();
+    switch2DSubTab(state.view2DSubMode || "canvas");
   }
 
   saveData(state);
@@ -529,7 +1372,8 @@ function switch2DSubTab(subMode) {
   const btnPhoto = document.getElementById("btn2DPhotoTab");
   const canvasWrap = document.getElementById("view2DCanvasWrap");
   const photoWrap = document.getElementById("view2DPhotoWrap");
-  const note = document.getElementById("photoSubNote");
+  const anglesGroup = document.getElementById("group2DAngles");
+  const anglesDivider = document.getElementById("divider2DAngles");
 
   if (btnCanvas) btnCanvas.classList.toggle("active", isCanvas);
   if (btnPhoto) btnPhoto.classList.toggle("active", !isCanvas);
@@ -537,14 +1381,39 @@ function switch2DSubTab(subMode) {
   if (canvasWrap) canvasWrap.style.display = isCanvas ? "block" : "none";
   if (photoWrap) photoWrap.style.display = isCanvas ? "none" : "block";
 
-  if (note) {
-    note.innerText = isCanvas
-      ? "Wall, floor & furniture colors change live with swatches"
-      : "Original high-resolution architectural moodboard photo";
-  }
+  if (anglesGroup) anglesGroup.style.display = isCanvas ? "flex" : "none";
+  if (anglesDivider) anglesDivider.style.display = isCanvas ? "block" : "none";
 
-  if (isCanvas) {
-    sync3DViewerMaterials();
+  sync3DViewerMaterials();
+  saveData(state);
+
+  const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
+  if (currentRoom) {
+    const activeConcept = currentRoom.concepts[state.activeConceptIndex] || currentRoom.concepts[0];
+    renderAnglesGallery(activeConcept);
+  }
+}
+
+function set2DAngle(angle) {
+  state.view2DAngle = angle;
+
+  ["btn2DAnglePersp", "btn2DAngleIso", "btn2DAngleTop"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("active");
+  });
+
+  const activeBtn = document.getElementById(
+    angle === "perspective" ? "btn2DAnglePersp" : (angle === "isometric" ? "btn2DAngleIso" : "btn2DAngleTop")
+  );
+  if (activeBtn) activeBtn.classList.add("active");
+
+  sync3DViewerMaterials();
+  saveData(state);
+
+  const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
+  if (currentRoom) {
+    const activeConcept = currentRoom.concepts[state.activeConceptIndex] || currentRoom.concepts[0];
+    renderAnglesGallery(activeConcept);
   }
 }
 
@@ -566,21 +1435,30 @@ function setViewerLighting(mode) {
   state.currentLightingMode = mode;
   if (viewer) viewer.setLightingMode(mode);
 
+  // Sync 3D buttons
   ["btnLightDay", "btnLightGolden", "btnLightNight"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.remove("active");
   });
-
-  const activeBtn = document.getElementById(
+  const active3D = document.getElementById(
     mode === "day" ? "btnLightDay" : mode === "golden" ? "btnLightGolden" : "btnLightNight"
   );
-  if (activeBtn) activeBtn.classList.add("active");
+  if (active3D) active3D.classList.add("active");
+
+  // Sync 2D buttons
+  ["btn2DLightDay", "btn2DLightGolden", "btn2DLightNight"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("active");
+  });
+  const active2D = document.getElementById(
+    mode === "day" ? "btn2DLightDay" : mode === "golden" ? "btn2DLightGolden" : "btn2DLightNight"
+  );
+  if (active2D) active2D.classList.add("active");
 
   sync3DViewerMaterials();
   saveData(state);
 }
 
-// --- CORE APPLICATION RENDERER ---
 function renderApp() {
   const currentRoom = state.rooms.find(r => r.id === state.activeRoomId) || state.rooms[0];
   const activeConcept = currentRoom.concepts[state.activeConceptIndex] || currentRoom.concepts[0];
@@ -716,21 +1594,56 @@ function renderConceptOptions(currentRoom) {
 
 function renderAnglesGallery(activeConcept) {
   const gallery = document.getElementById("anglesGallery");
+  if (!gallery) return;
   gallery.innerHTML = "";
 
-  if (activeConcept.thumbnails && activeConcept.thumbnails.length > 1) {
-    activeConcept.thumbnails.forEach((thumbUrl, idx) => {
-      const img = document.createElement("img");
-      img.src = thumbUrl;
-      img.className = `angle-thumb ${idx === 0 ? "active" : ""}`;
-      img.title = `Camera Angle ${idx + 1}`;
-      img.onclick = () => {
-        document.querySelectorAll(".angle-thumb").forEach(t => t.classList.remove("active"));
-        img.classList.add("active");
-        document.getElementById("activeRenderImg").src = thumbUrl;
-      };
-      gallery.appendChild(img);
-    });
+  if (state.viewportMode === "photo") {
+    if (state.view2DSubMode === "canvas") {
+      // 2D Studio Angle Cards
+      const angles = [
+        { id: "perspective", label: "🛋️ Eye-Level Perspective" },
+        { id: "isometric", label: "📐 Isometric 3D Cutaway" },
+        { id: "topdown", label: "🗺️ Architectural Blueprint" }
+      ];
+
+      angles.forEach(ang => {
+        const btn = document.createElement("button");
+        btn.className = `angle-card-btn ${state.view2DAngle === ang.id ? "active" : ""}`;
+        btn.innerText = ang.label;
+        btn.onclick = () => set2DAngle(ang.id);
+        gallery.appendChild(btn);
+      });
+
+      // Quick toggle to editorial photo
+      const photoBtn = document.createElement("button");
+      photoBtn.className = "angle-card-btn";
+      photoBtn.innerText = "📸 View Editorial Photo";
+      photoBtn.onclick = () => switch2DSubTab("photo");
+      gallery.appendChild(photoBtn);
+
+    } else {
+      // Editorial Photo Mode: Show angle thumbnails with resilient fallbacks
+      const canvasBtn = document.createElement("button");
+      canvasBtn.className = "angle-card-btn";
+      canvasBtn.innerText = "🎨 Open 2D Color Studio";
+      canvasBtn.onclick = () => switch2DSubTab("canvas");
+      gallery.appendChild(canvasBtn);
+
+      if (activeConcept.thumbnails && activeConcept.thumbnails.length > 0) {
+        activeConcept.thumbnails.forEach((thumbUrl, idx) => {
+          const btn = document.createElement("button");
+          btn.className = `angle-card-btn ${idx === 0 ? "active" : ""}`;
+          btn.innerText = `📸 Shot Angle ${idx + 1}`;
+          btn.onclick = () => {
+            document.querySelectorAll(".angle-card-btn").forEach(t => t.classList.remove("active"));
+            btn.classList.add("active");
+            const img = document.getElementById("activeRenderImg");
+            if (img) img.src = thumbUrl;
+          };
+          gallery.appendChild(btn);
+        });
+      }
+    }
   }
 }
 
@@ -811,10 +1724,12 @@ function togglePillarStatus(pillarKey, newStatus) {
 // --- MATERIAL SWATCHES & MODAL INSPECTION ---
 function renderSwatches(activeConcept) {
   const grid = document.getElementById("swatchesGrid");
+  if (!grid) return;
   grid.innerHTML = "";
 
   const mats = activeConcept.materials || [];
-  document.getElementById("activePaletteTag").innerText = `${mats.length} Specified Finishes`;
+  const tag = document.getElementById("activePaletteTag");
+  if (tag) tag.innerText = `${mats.length} Specified Finishes`;
 
   mats.forEach((mat, idx) => {
     const card = document.createElement("div");
@@ -822,14 +1737,24 @@ function renderSwatches(activeConcept) {
     card.innerHTML = `
       <div class="swatch-color" style="background-color: ${mat.color}; border-bottom: 1px solid rgba(0,0,0,0.06);"></div>
       <div class="swatch-info">
-        <div class="swatch-type">${mat.category}</div>
+        <div class="swatch-header-row">
+          <div class="swatch-type">${mat.category}</div>
+          <span class="swatch-spec-link" title="View technical specifications">🔍 Spec</span>
+        </div>
         <div class="swatch-name" title="${mat.name}">${mat.name}</div>
         <div class="swatch-code">${mat.code} &bull; $${mat.pricePerSqft || 20}/sq ft</div>
       </div>
     `;
 
-    // Click opens modal AND immediately highlights & tests
-    card.onclick = () => openMaterialModal(mat, card);
+    // Clicking card applies color directly to 3D and 2D models
+    card.onclick = (e) => {
+      if (e.target.classList.contains("swatch-spec-link")) {
+        openMaterialModal(mat, card);
+      } else {
+        applySingleMaterialLive(mat, card);
+      }
+    };
+
     grid.appendChild(card);
   });
 }
@@ -840,10 +1765,8 @@ function openMaterialModal(mat, cardElement) {
   document.querySelectorAll(".swatch-card").forEach(c => c.classList.remove("active-swatch"));
   if (cardElement) cardElement.classList.add("active-swatch");
 
-  // Instantly apply to 3D and 2D models
-  applySingleMaterialLive(mat);
+  applySingleMaterialLive(mat, cardElement);
 
-  // Populate modal data
   document.getElementById("matModalTitle").innerText = mat.name;
   document.getElementById("matModalCategory").innerText = `${mat.category} • Technical Specification`;
   document.getElementById("matModalSwatch").style.backgroundColor = mat.color;
@@ -864,22 +1787,46 @@ function closeMaterialModal() {
   selectedMaterialForModal = null;
 }
 
-function applySingleMaterialLive(mat) {
+function applySingleMaterialLive(mat, cardElement) {
   if (!mat) return;
   const cat = (mat.category || "").toLowerCase();
+
+  // Highlight card
+  document.querySelectorAll(".swatch-card").forEach(c => c.classList.remove("active-swatch"));
+  if (cardElement) cardElement.classList.add("active-swatch");
 
   const updates = {};
   if (cat.includes("wall") || cat.includes("paint")) updates.wallColor = mat.color;
   else if (cat.includes("floor") || cat.includes("cement")) updates.floorColor = mat.color;
-  else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("fabric") || cat.includes("linen")) updates.sofaColor = mat.color;
+  else if (cat.includes("upholstery") || cat.includes("bed") || cat.includes("fabric") || cat.includes("linen") || cat.includes("leather")) updates.sofaColor = mat.color;
   else if (cat.includes("wood") || cat.includes("cabinet") || cat.includes("teak") || cat.includes("slat") || cat.includes("headboard")) updates.accentWoodColor = mat.color;
-  else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter") || cat.includes("trim")) updates.accentColor = mat.color;
+  else if (cat.includes("metal") || cat.includes("accent") || cat.includes("stone") || cat.includes("counter") || cat.includes("trim") || cat.includes("quartz")) updates.accentColor = mat.color;
 
-  if (viewer) viewer.applyMaterials(updates);
+  if (viewer) {
+    try {
+      viewer.applyMaterials(updates);
+    } catch (e) {
+      console.warn("Viewer apply error:", e);
+    }
+  }
 
-  // Also update 2D canvas live!
+  // Update 2D canvas & photo live
   const currentRoom = state.rooms.find(r => r.id === state.activeRoomId);
-  render2DColorCustomizerCanvas(getRoomType(currentRoom), { ...viewer.currentSelections, ...updates });
+  const activeConcept = currentRoom ? (currentRoom.concepts[state.activeConceptIndex] || currentRoom.concepts[0]) : null;
+  const currentSelections = (viewer && viewer.currentSelections) ? viewer.currentSelections : {
+    wallColor: "#F0ECE1",
+    floorColor: "#CBB69D",
+    sofaColor: "#D7CFC7",
+    accentWoodColor: "#8E5A3C",
+    accentColor: "#CBB17C",
+    lightingMode: state.currentLightingMode || "golden"
+  };
+  const merged = { ...currentSelections, ...updates };
+
+  render2DColorCustomizerCanvas(getRoomType(currentRoom), merged, state.view2DAngle || "perspective");
+  if (activeConcept) renderPhotoHotspots(activeConcept, merged);
+
+  showToast(`Applied ${mat.name} (${mat.color}) to 3D and 2D models.`, "info");
 }
 
 function confirmApplyMaterialFromModal() {
